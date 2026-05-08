@@ -1,23 +1,52 @@
 #!/usr/bin/env python3
 """
-ZIP Code Map — local proxy server.
-Serves index.html and proxies Census Bureau TIGERweb requests to avoid CORS.
-No external dependencies — uses Python stdlib only.
+ZIP Code Map — local server.
+Serves index.html and queries the local ZCTA SQLite database (no external API).
+Run setup.py first if zcta.db doesn't exist.
 """
 import json
 import os
+import sqlite3
 import sys
 import urllib.parse
-import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Timer
 
 PORT = 8888
-TIGER_BASE = (
-    "https://tigerweb.geo.census.gov/arcgis/rest/services/"
-    "TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer/2/query"
-)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "zcta.db")
+
+
+def check_db():
+    if not os.path.exists(DB_PATH):
+        print("❌ База данных не найдена.")
+        print("   Сначала запустите: python3 setup.py")
+        sys.exit(1)
+    conn = sqlite3.connect(DB_PATH)
+    n = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]
+    conn.close()
+    print(f"✅ База данных: {n} ZIP-кодов")
+
+
+def query_zips(zips):
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ",".join("?" * len(zips))
+    rows = conn.execute(
+        f"SELECT zip, geometry FROM zcta WHERE zip IN ({placeholders})",
+        zips
+    ).fetchall()
+    conn.close()
+
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"ZCTA5CE20": row[0]},
+            "geometry": json.loads(row[1]),
+        }
+        for row in rows
+    ]
+    return {"type": "FeatureCollection", "features": features}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -33,70 +62,38 @@ class Handler(BaseHTTPRequestHandler):
             zips_raw = params.get("zips", [""])[0]
             zips = [z.strip() for z in zips_raw.split(",") if z.strip()]
             if not zips:
-                self._json_error(400, "No ZIP codes provided")
+                self._respond(400, "application/json", b'{"error":"No ZIP codes"}')
                 return
-            self._proxy_zcta(zips)
+            try:
+                geojson = query_zips(zips)
+                body = json.dumps(geojson, separators=(",", ":")).encode()
+                self._respond(200, "application/json", body)
+            except Exception as e:
+                body = json.dumps({"error": str(e)}).encode()
+                self._respond(500, "application/json", body)
 
         else:
             self.send_error(404)
 
-    def _proxy_zcta(self, zips):
-        quoted = ",".join(f"'{z}'" for z in zips)
-        where = f"ZCTA5CE20 IN ({quoted})"
-        query = urllib.parse.urlencode({
-            "where": where,
-            "outFields": "ZCTA5CE20",
-            "outSR": "4326",
-            "f": "geojson",
-        })
-        url = f"{TIGER_BASE}?{query}"
-
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "ZipCodeMap/1.0"})
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                data = resp.read()
-
-            # Validate we got real GeoJSON
-            parsed_json = json.loads(data)
-            if "error" in parsed_json:
-                msg = parsed_json["error"].get("message", "Census API error")
-                self._json_error(502, msg)
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(data)
-
-        except urllib.error.URLError as e:
-            self._json_error(502, f"Cannot reach Census Bureau API: {e.reason}")
-        except Exception as e:
-            self._json_error(500, str(e))
-
     def _serve_file(self, filename, content_type):
-        path = os.path.join(os.path.dirname(__file__), filename)
+        path = os.path.join(BASE_DIR, filename)
         try:
             with open(path, "rb") as f:
                 data = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            self._respond(200, content_type, data)
         except FileNotFoundError:
             self.send_error(404)
 
-    def _json_error(self, code, message):
-        body = json.dumps({"error": message}).encode()
+    def _respond(self, code, content_type, body):
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
-        # Only log errors
-        if args and str(args[1]) >= "400":
+        if args and len(args) > 1 and str(args[1]) >= "400":
             print(f"  [{args[1]}] {args[0]}", file=sys.stderr)
 
 
@@ -105,11 +102,13 @@ def open_browser():
 
 
 if __name__ == "__main__":
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(BASE_DIR)
+    check_db()
     server = HTTPServer(("localhost", PORT), Handler)
-    print(f"ZIP Code Map запущен → http://localhost:{PORT}")
-    print("Нажмите Ctrl+C для остановки\n")
-    Timer(1.2, open_browser).start()
+    db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
+    print(f"🗺  ZIP Code Map → http://localhost:{PORT}")
+    print(f"   База: {db_mb:.0f} MB  |  Ctrl+C для остановки\n")
+    Timer(1.0, open_browser).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
