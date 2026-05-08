@@ -1,308 +1,488 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>ZIP Code Map</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-      display: flex;
-      height: 100vh;
-      overflow: hidden;
-      background: #f0f2f5;
-    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+         display:flex;height:100vh;overflow:hidden;background:#f0f2f5}
 
     /* ── Sidebar ─────────────────────────────────────────── */
-    #sidebar {
-      width: 320px;
-      min-width: 260px;
-      padding: 18px 14px;
-      background: #ffffff;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      overflow-y: auto;
-      border-right: 1px solid #dde1e7;
-      box-shadow: 2px 0 8px rgba(0,0,0,.08);
-      z-index: 1000;
+    #sidebar{
+      width:320px;min-width:260px;
+      display:flex;flex-direction:column;
+      background:#fff;border-right:1px solid #dde1e7;
+      box-shadow:2px 0 8px rgba(0,0,0,.08);z-index:1000;overflow:hidden
     }
 
-    #sidebar h1 {
-      font-size: 17px;
-      font-weight: 700;
-      color: #1a73e8;
-    }
+    .panel{display:flex;flex-direction:column;gap:8px;padding:14px 12px;flex:1;min-height:0;overflow:hidden}
+    .panel+.panel{border-top:2px solid #e8eaed}
 
-    #sidebar p.hint {
-      font-size: 12px;
-      color: #5f6368;
-      line-height: 1.55;
+    .panel-title{
+      font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+      display:flex;align-items:center;gap:6px
     }
-    #sidebar p.hint code {
-      background: #f1f3f4;
-      padding: 1px 4px;
-      border-radius: 3px;
-      font-size: 11px;
-    }
+    .panel-title .dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
+    .dot-blue{background:#1a73e8}
+    .dot-red {background:#d93025}
 
-    textarea {
-      width: 100%;
-      height: 200px;
-      padding: 9px 10px;
-      font-size: 12.5px;
-      font-family: "SF Mono", "Courier New", monospace;
-      border: 1px solid #dadce0;
-      border-radius: 6px;
-      background: #fafafa;
-      color: #202124;
-      resize: vertical;
-      outline: none;
-      transition: border-color .15s;
-      line-height: 1.5;
+    textarea{
+      flex:1;min-height:80px;
+      padding:8px 9px;font-size:12px;font-family:"SF Mono","Courier New",monospace;
+      border:1px solid #dadce0;border-radius:5px;background:#fafafa;
+      color:#202124;resize:none;outline:none;line-height:1.55;transition:border-color .15s
     }
-    textarea:focus { border-color: #1a73e8; background: #fff; }
+    textarea:focus{border-color:inherit;background:#fff}
+    #incInput:focus{border-color:#1a73e8}
+    #excInput:focus{border-color:#d93025}
 
-    .btn-row { display: flex; gap: 8px; }
+    .btn-row{display:flex;gap:6px;flex-shrink:0}
+    button{
+      flex:1;padding:8px 4px;border:none;border-radius:5px;cursor:pointer;
+      font-size:12px;font-weight:600;transition:opacity .15s
+    }
+    button:hover{opacity:.85}
+    button:active{transform:scale(.97)}
 
-    button {
-      flex: 1;
-      padding: 9px 6px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      transition: box-shadow .15s, opacity .15s;
-    }
-    button:hover  { opacity: .88; }
-    button:active { transform: scale(.97); }
+    .btn-load-inc{background:#1a73e8;color:#fff}
+    .btn-load-exc{background:#d93025;color:#fff}
+    .btn-clear   {background:#fff;color:#5f6368;border:1px solid #dadce0}
 
-    #btnLoad  { background: #1a73e8; color: #fff; }
-    #btnClear { background: #fff; color: #d93025; border: 1px solid #dadce0; }
+    .prog-wrap{background:#e8eaed;border-radius:3px;height:3px;flex-shrink:0}
+    .prog-bar {height:100%;border-radius:3px;width:0%;transition:width .3s}
+    .prog-blue{background:#1a73e8}
+    .prog-red {background:#d93025}
 
-    /* ── Progress ────────────────────────────────────────── */
-    .progress-wrap {
-      background: #e8eaed;
-      border-radius: 4px;
-      height: 4px;
-      overflow: hidden;
-    }
-    .progress-bar {
-      height: 100%;
-      background: #1a73e8;
-      width: 0%;
-      transition: width .3s ease;
-    }
-
-    /* ── Status / Stats ──────────────────────────────────── */
-    #statusBox {
-      font-size: 12px;
-      color: #5f6368;
-      min-height: 16px;
-    }
-    #statsBox {
-      font-size: 12px;
-      color: #3c4043;
-      line-height: 1.7;
-    }
-    #statsBox b { color: #1a73e8; }
+    .status{font-size:11px;color:#5f6368;min-height:14px;flex-shrink:0}
+    .status b{color:#3c4043}
 
     /* ── Legend ──────────────────────────────────────────── */
-    .legend {
-      font-size: 11px;
-      color: #80868b;
-      line-height: 1.65;
-      border-top: 1px solid #e8eaed;
-      padding-top: 10px;
-      margin-top: auto;
+    #legend{
+      padding:10px 12px;border-top:1px solid #e8eaed;
+      font-size:11px;color:#80868b;line-height:1.8;flex-shrink:0
     }
-    .legend .swatch {
-      display: inline-block;
-      width: 14px; height: 10px;
-      border-radius: 2px;
-      margin-right: 5px;
-      vertical-align: middle;
-    }
+    .leg-row{display:flex;align-items:center;gap:6px}
+    .swatch{width:16px;height:10px;border-radius:2px;flex-shrink:0}
 
     /* ── Map ─────────────────────────────────────────────── */
-    #map { flex: 1; }
+    #map{flex:1}
 
-    /* Tooltip */
-    .leaflet-tooltip {
-      background: #1a73e8;
-      border: none;
-      color: #fff;
-      font-weight: 700;
-      font-size: 13px;
-      padding: 4px 9px;
-      border-radius: 4px;
-      box-shadow: 0 2px 6px rgba(0,0,0,.25);
-      pointer-events: none;
+    /* ── Floating tooltip ────────────────────────────────── */
+    #floatTip{
+      position:fixed;display:none;z-index:9999;
+      background:#fff;border:1px solid #dadce0;border-radius:8px;
+      box-shadow:0 4px 16px rgba(0,0,0,.18);
+      font-size:12px;min-width:160px;pointer-events:none
     }
-    .leaflet-tooltip::before { display: none; }
+    #floatTip.active{display:block;pointer-events:auto}
+    #floatTip .tip-head{
+      padding:8px 12px 6px;font-weight:700;font-size:13px;color:#202124;
+      border-bottom:1px solid #f1f3f4
+    }
+    #floatTip .tip-sub{padding:4px 12px;color:#5f6368;font-size:11px}
+    #floatTip .tip-actions{padding:6px 8px 8px;display:flex;flex-direction:column;gap:3px}
+    .tip-btn{
+      width:100%;padding:6px 10px;border:none;border-radius:5px;
+      text-align:left;cursor:pointer;font-size:12px;font-weight:500;
+      transition:background .1s
+    }
+    .tip-btn-exc{background:#fff3f3;color:#d93025}
+    .tip-btn-exc:hover{background:#fce8e6}
+    .tip-btn-rem{background:#f1f8ff;color:#1a73e8}
+    .tip-btn-rem:hover{background:#e8f0fe}
+    .tip-btn-close{background:#f8f9fa;color:#5f6368;font-size:11px}
+    .tip-btn-close:hover{background:#f1f3f4}
+
+    /* Leaflet tooltip override */
+    .leaflet-tooltip{
+      background:#1a73e8;border:none;color:#fff;
+      font-weight:700;font-size:12px;padding:3px 8px;border-radius:4px;
+      box-shadow:0 2px 6px rgba(0,0,0,.25);pointer-events:none
+    }
+    .leaflet-tooltip.exc-tip{background:#c62828}
+    .leaflet-tooltip::before{display:none}
   </style>
 </head>
 <body>
 
 <div id="sidebar">
-  <h1>📍 ZIP Code Map</h1>
 
-  <p class="hint">
-    Вставьте список ZIP-кодов — по одному на строку.<br>
-    Поддерживаемые форматы:<br>
-    <code>16112, Pennsylvania, United States</code><br>
-    <code>16112</code>
-  </p>
-
-  <textarea id="zipInput"
-    placeholder="16112, Pennsylvania, United States&#10;16116, Pennsylvania, United States&#10;&#10;или просто:&#10;16112&#10;16116&#10;90210"></textarea>
-
-  <div class="btn-row">
-    <button id="btnLoad"  onclick="loadZipCodes()">▶ Показать на карте</button>
-    <button id="btnClear" onclick="clearMap()">✕ Очистить</button>
+  <!-- ── INCLUDED ──────────────────────────────────────── -->
+  <div class="panel" id="incPanel">
+    <div class="panel-title">
+      <span class="dot dot-blue"></span>
+      Included areas
+    </div>
+    <textarea id="incInput"
+      placeholder="Вставьте ZIP-коды:&#10;16112, Pennsylvania, United States&#10;16116&#10;90210"></textarea>
+    <div class="btn-row">
+      <button class="btn-load-inc" onclick="loadIncluded()">▶ Показать</button>
+      <button class="btn-clear"    onclick="clearIncluded()">✕</button>
+    </div>
+    <div class="prog-wrap"><div class="prog-bar prog-blue" id="incProg"></div></div>
+    <div class="status" id="incStatus">Готов</div>
   </div>
 
-  <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
-  <div id="statusBox">Готов к работе</div>
-  <div id="statsBox"></div>
+  <!-- ── EXCLUDED ──────────────────────────────────────── -->
+  <div class="panel" id="excPanel">
+    <div class="panel-title">
+      <span class="dot dot-red"></span>
+      Excluded areas
+    </div>
+    <textarea id="excInput"
+      placeholder="ZIP, штат, округ:&#10;16117&#10;PA&#10;Pennsylvania&#10;Allegheny County, PA&#10;Lawrence County"></textarea>
+    <div class="btn-row">
+      <button class="btn-load-exc" onclick="loadExcluded()">▶ Показать</button>
+      <button class="btn-clear"    onclick="clearExcluded()">✕</button>
+    </div>
+    <div class="prog-wrap"><div class="prog-bar prog-red" id="excProg"></div></div>
+    <div class="status" id="excStatus">Готов</div>
+  </div>
 
-  <div class="legend">
-    <div>
-      <span class="swatch" style="background:rgba(26,115,232,.25);border:1.5px solid #1a73e8;"></span>
-      ZIP-зона (ZCTA)
+  <!-- ── Legend ───────────────────────────────────────── -->
+  <div id="legend">
+    <div class="leg-row">
+      <span class="swatch" style="background:rgba(26,115,232,.25);border:1.5px solid #1a73e8"></span>
+      Включённые ZIP-зоны
     </div>
-    <div style="margin-top:3px">
-      <span class="swatch" style="background:rgba(26,115,232,.55);border:2px solid #1558b0;"></span>
-      При наведении
+    <div class="leg-row">
+      <span class="swatch" style="background:rgba(198,40,40,.28);border:1.5px solid #d93025"></span>
+      Исключённые области
     </div>
-    <div style="margin-top:8px">Источник: US Census Bureau TIGERweb</div>
+    <div class="leg-row">
+      <span class="swatch" style="background:rgba(198,40,40,.55);border:2px solid #b71c1c"></span>
+      Пересечение (блокировка)
+    </div>
+    <div style="margin-top:4px;font-size:10px">
+      Наведите на зону → меню исключения
+    </div>
   </div>
 </div>
 
 <div id="map"></div>
 
+<!-- Floating tooltip -->
+<div id="floatTip">
+  <div class="tip-head" id="tipHead"></div>
+  <div class="tip-sub"  id="tipSub"></div>
+  <div class="tip-actions" id="tipActions"></div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ── Map ───────────────────────────────────────────────────────────────────────
 const map = L.map('map').setView([39.5, -98.35], 5);
-
-// Light tile — CartoDB Positron (clean, similar to Google Maps style)
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
-  subdomains: 'abcd',
-  maxZoom: 19
+  attribution:'© OpenStreetMap © CARTO', subdomains:'abcd', maxZoom:19
 }).addTo(map);
 
-const zipLayer = L.featureGroup().addTo(map);
+const incLayer = L.featureGroup().addTo(map);   // blue – included
+const excLayer = L.featureGroup().addTo(map);   // red  – excluded
+
+// ── State ─────────────────────────────────────────────────────────────────────
+// Map: exclusionKey → { displayName, leafletLayer }
+const exclusions = new Map();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const $ = id => document.getElementById(id);
+const $  = id => document.getElementById(id);
+const tip = $('floatTip');
 
-function setStatus(msg)  { $('statusBox').textContent = msg; }
-function setStats(html)  { $('statsBox').innerHTML = html; }
-function setProgress(p)  { $('progressBar').style.width = p + '%'; }
+function setStatus(id, html){ $(id).innerHTML = html }
+function setProg(id, p){ $(id).style.width = p + '%' }
 
-function parseZipCodes(text) {
-  const zips = new Set();
-  for (const line of text.split('\n')) {
-    const m = line.match(/\b(\d{5})\b/);
-    if (m) zips.add(m[1]);
-  }
-  return [...zips];
+function parseZips(text){
+  const s = new Set();
+  for(const l of text.split('\n')){const m=l.match(/\b(\d{5})\b/);if(m)s.add(m[1])}
+  return [...s]
+}
+function parseExcLines(text){
+  return text.split('\n').map(l=>l.trim()).filter(Boolean)
 }
 
-// ── API (proxied through local server) ────────────────────────────────────────
-async function queryBatch(batch) {
-  const url = `/api/zcta?zips=${batch.join(',')}`;
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${resp.status}`);
-  }
-  return resp.json();
+// ── Floating tooltip ──────────────────────────────────────────────────────────
+let tipTimeout = null;
+
+function showTip(e, headHTML, subHTML, actions){
+  $('tipHead').innerHTML    = headHTML;
+  $('tipSub').innerHTML     = subHTML || '';
+  $('tipActions').innerHTML = actions;
+  tip.classList.add('active');
+  moveTip(e);
 }
 
-// ── Layer style ───────────────────────────────────────────────────────────────
-const STYLE_DEFAULT = { color: '#1a73e8', fillColor: '#1a73e8', fillOpacity: 0.22, weight: 1.5 };
-const STYLE_HOVER   = { color: '#1558b0', fillColor: '#1a73e8', fillOpacity: 0.52, weight: 2.5 };
+function moveTip(e){
+  const x = e.originalEvent ? e.originalEvent.clientX : e.clientX;
+  const y = e.originalEvent ? e.originalEvent.clientY : e.clientY;
+  const w = tip.offsetWidth || 180;
+  const h = tip.offsetHeight || 120;
+  tip.style.left = (x + 14 + w > window.innerWidth ? x - w - 8 : x + 14) + 'px';
+  tip.style.top  = (y + 14 + h > window.innerHeight ? y - h - 8 : y + 14) + 'px';
+}
 
-function buildLayer(geojson) {
+function hideTip(){
+  tip.classList.remove('active');
+  currentHoverLayer = null;
+}
+
+map.on('click', hideTip);
+
+// Keep tooltip open when mouse is over it
+tip.addEventListener('mouseleave', hideTip);
+
+let currentHoverLayer = null;
+let currentZip = null;
+let currentExcKey = null;
+
+// ── Style helpers ─────────────────────────────────────────────────────────────
+const S_INC      = {color:'#1a73e8',fillColor:'#1a73e8',fillOpacity:.2,weight:1.5};
+const S_INC_HOV  = {color:'#1558b0',fillColor:'#1a73e8',fillOpacity:.5,weight:2.5};
+const S_EXC      = {color:'#d93025',fillColor:'#c62828',fillOpacity:.28,weight:1.5};
+const S_EXC_HOV  = {color:'#b71c1c',fillColor:'#c62828',fillOpacity:.55,weight:2.5};
+
+// ── Build included layer ──────────────────────────────────────────────────────
+function buildIncLayer(geojson){
   return L.geoJSON(geojson, {
-    style: STYLE_DEFAULT,
-    onEachFeature(feature, layer) {
-      const zip = feature.properties.ZCTA5CE20;
-      layer.bindTooltip(zip, { sticky: true, offset: [12, 0] });
-      layer.on('mouseover', function () { this.setStyle(STYLE_HOVER); this.bringToFront(); });
-      layer.on('mouseout',  function () { this.setStyle(STYLE_DEFAULT); });
+    style: S_INC,
+    onEachFeature(feature, layer){
+      const zip  = feature.properties.ZCTA5CE20;
+      layer.bindTooltip(`ZIP ${zip}`, {sticky:true, offset:[10,0]});
+      layer.on('mouseover', function(e){
+        this.setStyle(S_INC_HOV); this.bringToFront();
+        currentHoverLayer = this; currentZip = zip;
+        showTip(e,
+          `ZIP ${zip}`,
+          '<span id="tipLocLoading">Определяю округ…</span>',
+          buildIncActions(zip, null, null)
+        );
+        loadZipContext(zip);
+      });
+      layer.on('mousemove', moveTip);
+      layer.on('mouseout', function(){
+        this.setStyle(S_INC);
+        if(currentHoverLayer === this) hideTip();
+      });
     }
   });
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-async function loadZipCodes() {
-  const zips = parseZipCodes($('zipInput').value);
-  if (!zips.length) {
-    setStatus('Не найдено ни одного 5-значного ZIP-кода.');
-    return;
-  }
-
-  clearMap();
-  setProgress(2);
-  setStatus(`Найдено ${zips.length} ZIP-кодов, загружаю…`);
-
-  const BATCH = 400;
-  const batches = [];
-  for (let i = 0; i < zips.length; i += BATCH) batches.push(zips.slice(i, i + BATCH));
-
-  let loaded = 0, errors = 0;
-  const notFound = [];
-
-  for (let i = 0; i < batches.length; i++) {
-    setStatus(`Батч ${i + 1} / ${batches.length}…`);
-    setProgress(Math.round(5 + (i / batches.length) * 90));
-
-    try {
-      const geojson  = await queryBatch(batches[i]);
-      const foundSet = new Set(geojson.features.map(f => f.properties.ZCTA5CE20));
-
-      batches[i].filter(z => !foundSet.has(z)).forEach(z => notFound.push(z));
-      loaded += foundSet.size;
-
-      if (geojson.features.length) buildLayer(geojson).addTo(zipLayer);
-
-    } catch (err) {
-      errors += batches[i].length;
-      console.error('Batch error:', err.message);
-    }
-  }
-
-  setProgress(100);
-
-  if (zipLayer.getLayers().length) {
-    map.fitBounds(zipLayer.getBounds(), { padding: [30, 30] });
-  }
-
-  const lines = [
-    `✅ Загружено: <b>${loaded}</b> из <b>${zips.length}</b>`,
-    notFound.length
-      ? `⚠️ Не найдено: <b>${notFound.length}</b>${notFound.length <= 25 ? ' — ' + notFound.join(', ') : ''}`
-      : '',
-    errors ? `❌ Ошибки сети: ${errors}` : '',
-  ].filter(Boolean);
-
-  setStatus('Готово.');
-  setStats(lines.join('<br>'));
+async function loadZipContext(zip){
+  try{
+    const r  = await fetch(`/api/zip-context?zip=${zip}`);
+    const ctx = await r.json();
+    if(ctx.error) return;
+    let loc = '';
+    if(ctx.county_name) loc += ctx.county_name;
+    if(ctx.state_abbr)  loc += (loc ? ', ' : '') + ctx.state_abbr;
+    const sub = $('tipLocLoading');
+    if(sub) sub.textContent = loc || '';
+    $('tipActions').innerHTML = buildIncActions(zip, ctx, loc);
+  }catch(e){}
 }
 
-function clearMap() {
-  zipLayer.clearLayers();
-  setProgress(0);
-  setStatus('Карта очищена.');
-  setStats('');
+function buildIncActions(zip, ctx, loc){
+  const excZip   = `<button class="tip-btn tip-btn-exc" onclick="excludeAsZip('${zip}')">🚫 Исключить как ZIP ${zip}</button>`;
+  const excCo    = ctx && ctx.county_fips
+    ? `<button class="tip-btn tip-btn-exc" onclick="excludeAsCounty('${ctx.county_fips}','${escq(ctx.county_name)}','${ctx.state_abbr}')">🚫 Исключить как County</button>`
+    : '';
+  const excSt    = ctx && ctx.state_fips
+    ? `<button class="tip-btn tip-btn-exc" onclick="excludeAsState('${ctx.state_fips}','${escq(ctx.state_name)}')">🚫 Исключить как State</button>`
+    : '';
+  const close    = `<button class="tip-btn tip-btn-close" onclick="hideTip()">✕ Закрыть</button>`;
+  return excZip + excCo + excSt + close;
+}
+
+function escq(s){ return (s||'').replace(/'/g,"\\'") }
+
+// ── Build excluded layer ──────────────────────────────────────────────────────
+function buildExcLayer(geojson, excKey){
+  const layer = L.geoJSON(geojson, {
+    style: S_EXC,
+    onEachFeature(feature, lyr){
+      const name = feature.properties.display_name || excKey;
+      lyr.bindTooltip(name, {sticky:true, offset:[10,0], className:'exc-tip'});
+      lyr.on('mouseover', function(e){
+        this.setStyle(S_EXC_HOV); this.bringToFront();
+        currentExcKey = excKey;
+        showTip(e,
+          `<span style="color:#d93025">${name}</span>`,
+          'Исключённая зона',
+          `<button class="tip-btn tip-btn-rem" onclick="removeExclusion('${escq(excKey)}')">✅ Убрать из исключений</button>
+           <button class="tip-btn tip-btn-close" onclick="hideTip()">✕ Закрыть</button>`
+        );
+      });
+      lyr.on('mousemove', moveTip);
+      lyr.on('mouseout', function(){
+        this.setStyle(S_EXC);
+        if(currentExcKey === excKey) hideTip();
+      });
+    }
+  });
+  return layer;
+}
+
+// ── Exclude helpers ───────────────────────────────────────────────────────────
+async function excludeAsZip(zip){
+  hideTip();
+  const key = `zip:${zip}`;
+  if(exclusions.has(key)) return;
+  const fc = await apiFetch(`/api/zcta?zips=${zip}`);
+  if(!fc || !fc.features.length) return;
+  // Tag feature for display name
+  fc.features.forEach(f => f.properties.display_name = `ZIP ${zip}`);
+  addExclusion(key, `ZIP ${zip}`, fc);
+  addToExcTextarea(`${zip}`);
+}
+
+async function excludeAsCounty(fips, name, stateAbbr){
+  hideTip();
+  const key = `county:${fips}`;
+  if(exclusions.has(key)) return;
+  const label = `${name}, ${stateAbbr}`;
+  const r = await fetch(`/api/search?q=${encodeURIComponent(name + ' County, ' + stateAbbr)}`);
+  const fc = await r.json();
+  if(!fc.features.length) return;
+  fc.features.forEach(f => f.properties.display_name = label);
+  addExclusion(key, label, fc);
+  addToExcTextarea(`${name} County, ${stateAbbr}`);
+}
+
+async function excludeAsState(fips, name){
+  hideTip();
+  const key = `state:${fips}`;
+  if(exclusions.has(key)) return;
+  const r = await fetch(`/api/search?q=${encodeURIComponent(name)}`);
+  const fc = await r.json();
+  if(!fc.features.length) return;
+  fc.features.forEach(f => f.properties.display_name = name);
+  addExclusion(key, name, fc);
+  addToExcTextarea(name);
+}
+
+function addExclusion(key, displayName, fc){
+  if(exclusions.has(key)) return;
+  const lyr = buildExcLayer(fc, key);
+  lyr.addTo(excLayer);
+  exclusions.set(key, {displayName, lyr});
+  updateExcStatus();
+}
+
+function removeExclusion(key){
+  hideTip();
+  const entry = exclusions.get(key);
+  if(!entry) return;
+  excLayer.removeLayer(entry.lyr);
+  exclusions.delete(key);
+  updateExcStatus();
+  // Remove from textarea
+  const ta = $('excInput');
+  const lines = ta.value.split('\n').filter(l => l.trim() !== entry.displayName && l.trim() !== '');
+  ta.value = lines.join('\n');
+}
+
+function addToExcTextarea(line){
+  const ta = $('excInput');
+  const existing = ta.value.trim();
+  if(!existing){
+    ta.value = line;
+  } else if(!existing.split('\n').some(l => l.trim() === line.trim())){
+    ta.value = existing + '\n' + line;
+  }
+}
+
+function updateExcStatus(){
+  const n = exclusions.size;
+  setStatus('excStatus', n ? `<b>${n}</b> зон исключено` : 'Готов');
+}
+
+// ── Load included ─────────────────────────────────────────────────────────────
+async function loadIncluded(){
+  const zips = parseZips($('incInput').value);
+  if(!zips.length){ setStatus('incStatus','Нет ZIP-кодов'); return; }
+  clearIncluded();
+  setProg('incProg', 2);
+
+  const BATCH = 400;
+  let loaded = 0, notFound = [];
+  const batches = [];
+  for(let i=0;i<zips.length;i+=BATCH) batches.push(zips.slice(i,i+BATCH));
+
+  for(let i=0;i<batches.length;i++){
+    setStatus('incStatus', `Батч ${i+1}/${batches.length}…`);
+    setProg('incProg', Math.round(5 + i/batches.length*90));
+    try{
+      const fc = await apiFetch(`/api/zcta?zips=${batches[i].join(',')}`);
+      const found = new Set(fc.features.map(f=>f.properties.ZCTA5CE20));
+      batches[i].filter(z=>!found.has(z)).forEach(z=>notFound.push(z));
+      loaded += found.size;
+      if(fc.features.length) buildIncLayer(fc).addTo(incLayer);
+    }catch(e){ setStatus('incStatus',`Ошибка: ${e.message}`) }
+  }
+
+  setProg('incProg', 100);
+  if(incLayer.getLayers().length) map.fitBounds(incLayer.getBounds(),{padding:[30,30]});
+
+  const parts = [`✅ <b>${loaded}</b>/${zips.length} ZIP загружено`];
+  if(notFound.length) parts.push(`⚠️ не найдено: <b>${notFound.length}</b>`);
+  setStatus('incStatus', parts.join(' · '));
+}
+
+// ── Load excluded ─────────────────────────────────────────────────────────────
+async function loadExcluded(){
+  const lines = parseExcLines($('excInput').value);
+  if(!lines.length){ setStatus('excStatus','Нет данных'); return; }
+
+  let done=0, errors=0;
+  setProg('excProg', 2);
+
+  for(const line of lines){
+    setStatus('excStatus', `Ищу: ${line}…`);
+    try{
+      const r  = await fetch(`/api/search?q=${encodeURIComponent(line)}`);
+      const fc = await r.json();
+      if(fc.features && fc.features.length){
+        const key  = `search:${line}`;
+        const name = fc.features[0].properties.display_name || line;
+        if(!exclusions.has(key)){
+          fc.features.forEach(f => { f.properties.display_name = name; });
+          addExclusion(key, name, fc);
+        }
+        done++;
+      } else {
+        errors++;
+        console.warn('Not found:', line);
+      }
+    }catch(e){ errors++; }
+    setProg('excProg', Math.round(5 + (done+errors)/lines.length*90));
+  }
+
+  setProg('excProg', 100);
+  const parts = [`✅ <b>${done}</b> загружено`];
+  if(errors) parts.push(`⚠️ не найдено: <b>${errors}</b>`);
+  setStatus('excStatus', parts.join(' · '));
+}
+
+// ── Clear ─────────────────────────────────────────────────────────────────────
+function clearIncluded(){
+  incLayer.clearLayers();
+  setProg('incProg',0);
+  setStatus('incStatus','Очищено');
+}
+
+function clearExcluded(){
+  excLayer.clearLayers();
+  exclusions.clear();
+  setProg('excProg',0);
+  setStatus('excStatus','Очищено');
+}
+
+// ── API helper ────────────────────────────────────────────────────────────────
+async function apiFetch(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 </script>
 </body>
