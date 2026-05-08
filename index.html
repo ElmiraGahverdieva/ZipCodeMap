@@ -481,23 +481,30 @@ async function loadIncluded(){
 // ── Input classifier ─────────────────────────────────────────────────────────
 // Returns {type, zip|name|query, state, display, key}
 function classifyExcLine(raw) {
-  // Strip trailing "United States" / "USA" and normalize
+  // Strip trailing country qualifiers so "Virginia, United States" → "Virginia"
   let line = raw
-    .replace(/,?\s*(united states of america|united states|usa)\s*$/i, '')
+    .replace(/,?\s*(united states of america|united states|u\.s\.a?\.)\s*$/i, '')
+    .replace(/,?\s*\busa\b\s*$/i, '')
+    .replace(/,?\s*\bcanada\b\s*$/i, '')
     .replace(/,\s*$/, '')
     .trim();
   if (!line) return null;
 
-  // Split on commas
   const parts = line.split(/\s*,\s*/);
   const first = parts[0].trim();
 
-  // ── ZIP code (5 digits at start) ──
+  // ── ZIP code (5 digits) ──
   if (/^\d{5}$/.test(first)) {
     return { raw, type:'zip', zip:first, display:`ZIP ${first}`, key:`zip:${first}` };
   }
 
-  // ── County: first segment ends with "County" ──
+  // ── 2-letter US state abbreviation (PA, NY …) ──
+  if (parts.length === 1 && /^[A-Z]{2}$/i.test(first) && US_STATE_ABBRS.has(first.toUpperCase())) {
+    return { raw, type:'state', name:first.toUpperCase(), display:first,
+             key:`state:${first.toLowerCase()}` };
+  }
+
+  // ── County (has "county" keyword) ──
   if (/\bcounty\b/i.test(first)) {
     const countyName = first.replace(/\s*county\s*$/i, '').trim();
     const state = parts.length > 1 ? parts[parts.length - 1].trim() : '';
@@ -507,15 +514,8 @@ function classifyExcLine(raw) {
              key: `county:${display.toLowerCase()}` };
   }
 
-  // ── State: single token that is a known state name or abbreviation ──
-  if (parts.length === 1) {
-    if (US_STATE_NAMES.has(first.toLowerCase()) || US_STATE_ABBRS.has(first.toUpperCase())) {
-      return { raw, type:'state', name:first, display:first,
-               key:`state:${first.toLowerCase()}` };
-    }
-  }
-
-  // ── City / place / congressional district / other ──
+  // ── Everything else: country, province, state by full name, city ──
+  // searchLocal() will find these in countries/admin1 tables
   return { raw, type:'place', query:line, display:first || line,
            key:`place:${line.toLowerCase()}` };
 }
@@ -533,8 +533,12 @@ async function nomSearch(query, opts = {}) {
   return nominatim(`/search?${p}`);
 }
 
-// Fetch US state boundary: TIGERweb → local DB → Nominatim
+// Fetch US state boundary: local DB (admin1) → TIGERweb → Nominatim
 async function fetchStateBoundary(name) {
+  // admin1 table has all US states from Natural Earth
+  const local = await searchLocal(name);
+  if (local) return local;
+  // TIGERweb for higher-res Census boundary
   const tl = await getTigerLayers();
   if (tl.stateUrl) {
     const safe  = name.replace(/'/g, "''");
@@ -544,13 +548,14 @@ async function fetchStateBoundary(name) {
     const fc = await tigerQuery(tl.stateUrl, where, 'NAME,STUSAB');
     if (fc) return fc;
   }
-  const local = await searchLocal(name);
-  if (local) return local;
   return nomSearch(name + ' state', { countrycodes:'us' });
 }
 
-// Fetch US county boundary: TIGERweb → local DB → Nominatim
+// Fetch US county boundary: local DB → TIGERweb → Nominatim
 async function fetchCountyBoundary(name, state) {
+  const q = name + ' county' + (state ? ` ${state}` : '');
+  const local = await searchLocal(q);
+  if (local) return local;
   const tl = await getTigerLayers();
   if (tl.countyUrl) {
     const safe  = name.replace(/'/g, "''");
@@ -559,9 +564,6 @@ async function fetchCountyBoundary(name, state) {
     const fc = await tigerQuery(tl.countyUrl, where, 'NAME,STUSAB,NAMELSAD');
     if (fc) return fc;
   }
-  const q = name + ' county' + (state ? ` ${state}` : '');
-  const local = await searchLocal(q);
-  if (local) return local;
   return nomSearch(q + ' USA', { countrycodes:'us' });
 }
 
@@ -626,7 +628,7 @@ async function loadExcluded() {
     }
   }
 
-  // ── 2. States — TIGERweb → local DB → Nominatim ──
+  // ── 2. States (2-letter abbr only) — local DB → TIGERweb → Nominatim ──
   if (byType.state.length) {
     tick('Штаты');
     for (const item of byType.state) {
@@ -643,7 +645,7 @@ async function loadExcluded() {
     }
   }
 
-  // ── 3. Counties — TIGERweb → local DB → Nominatim ──
+  // ── 3. Counties — local DB → TIGERweb → Nominatim ──
   if (byType.county.length) {
     tick('Округа');
     for (const item of byType.county) {
@@ -660,17 +662,23 @@ async function loadExcluded() {
     }
   }
 
-  // ── 4. Places / cities / congressional districts / international ──
+  // ── 4. Places: countries, provinces, states by full name, cities ──
+  // Most resolve instantly from local DB (countries/admin1 tables).
+  // Only unrecognized cities fall through to Nominatim.
   if (byType.place.length) {
     tick('Места');
     for (const item of byType.place) {
       if (exclusions.has(item.key)) { done++; tick('Места'); continue; }
       try {
+        // Try local DB first — instant for countries and world provinces/states
         let fc = await searchLocal(item.query);
-        if (!fc) fc = await nomSearch(item.query, { countrycodes:'us' });
-        if (!fc) fc = await nomSearch(item.query);  // international fallback (no countrycodes)
+        if (!fc) {
+          // Nominatim fallback for cities/specific places not in DB
+          fc = await nomSearch(item.query, { countrycodes:'us' });
+          if (!fc) fc = await nomSearch(item.query);  // no country filter = international
+        }
         if (hasPolygon(fc)) {
-          const label = fc.features[0].properties.display_name?.split(',')[0] || item.display;
+          const label = fc.features[0].properties.display_name || item.display;
           fc.features.forEach(f => f.properties.display_name = label);
           addExclusion(item.key, label, fc);
           done++;

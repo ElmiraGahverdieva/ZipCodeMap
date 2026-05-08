@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-One-time setup: download US ZCTA, county and state shapefiles from Census Bureau,
-convert to GeoJSON, and index into local SQLite database.
+One-time setup: downloads ZCTA + Natural Earth countries/provinces into SQLite.
 Run once; then use start.sh every time.
+  python3 setup.py                         # auto-download everything
+  python3 setup.py --file cb_...zip        # supply ZCTA zip manually
+  python3 setup.py --rebuild               # force full rebuild
 """
 import json
 import os
@@ -10,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import urllib.request
 import zipfile
 
@@ -21,24 +24,35 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "*/*",
-    "Referer": "https://www.census.gov/",
 }
 
-SHAPEFILES = {
-    "zcta": [
-        "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
-        "https://www2.census.gov/geo/tiger/GENZ2021/shp/cb_2021_us_zcta520_500k.zip",
-        "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_zcta510_500k.zip",
-    ],
-    "states": [
-        "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_state_500k.zip",
-        "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_state_500k.zip",
-    ],
-    "counties": [
-        "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_county_500k.zip",
-        "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_county_500k.zip",
-    ],
-}
+# Census Bureau (may be blocked by Cloudflare; user can supply manually)
+ZCTA_URLS = [
+    "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
+    "https://www2.census.gov/geo/tiger/GENZ2021/shp/cb_2021_us_zcta520_500k.zip",
+    "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_zcta510_500k.zip",
+]
+
+# Natural Earth — hosted on AWS S3, no Cloudflare blocking
+NE_COUNTRIES_URL = "https://naturalearth.s3.amazonaws.com/50m_cultural/ne_50m_admin_0_countries.zip"
+NE_ADMIN1_URL    = "https://naturalearth.s3.amazonaws.com/50m_cultural/ne_50m_admin_1_states_provinces.zip"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def normalize(s):
+    """ASCII-fold for accent-insensitive search (Côte → Cote)."""
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower()
+
+
+def fget(rec, *keys):
+    """Case-insensitive field getter for shapefile records."""
+    for k in keys:
+        for variant in (k, k.upper(), k.lower()):
+            v = rec.get(variant)
+            if v and str(v).strip() not in ("", "-99", "-1"):
+                return str(v).strip()
+    return ""
 
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
@@ -61,11 +75,15 @@ def ensure_pyshp():
 # ── Download ──────────────────────────────────────────────────────────────────
 
 def download(url):
-    print(f"  {os.path.basename(url)}")
+    print(f"  ↓ {os.path.basename(url)}")
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         tmp = tempfile.mktemp(suffix=".zip")
         with urllib.request.urlopen(req, timeout=180) as resp:
+            ct = resp.headers.get("Content-Type", "")
+            if "html" in ct.lower():
+                print("  ❌ Сервер вернул HTML (заблокировано)")
+                return None
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
             with open(tmp, "wb") as f:
@@ -79,7 +97,11 @@ def download(url):
                         pct = min(downloaded * 100 // total, 100)
                         bar = "█" * (pct // 4) + "░" * (25 - pct // 4)
                         print(f"\r  [{bar}] {pct}%  {downloaded/1024/1024:.1f} MB", end="", flush=True)
-        print(f"\r  {'█'*25} 100%  {downloaded/1024/1024:.1f} MB загружено")
+        print(f"\r  {'█'*25} 100%  {downloaded/1024/1024:.1f} MB")
+        if downloaded < 50_000:
+            print("  ❌ Файл слишком маленький")
+            os.remove(tmp)
+            return None
         return tmp
     except Exception as e:
         print(f"\n  Ошибка: {e}")
@@ -88,19 +110,6 @@ def download(url):
         except Exception:
             pass
         return None
-
-
-def try_sources(key, manual_file=None):
-    if manual_file:
-        if os.path.exists(manual_file):
-            return manual_file
-        print(f"  Файл не найден: {manual_file}")
-        return None
-    for url in SHAPEFILES[key]:
-        path = download(url)
-        if path:
-            return path
-    return None
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -188,61 +197,93 @@ def build_zcta(zip_path, conn):
     print(f"\r  ✓ ZCTA: {n} ZIP-кодов")
 
 
-def build_states(zip_path, conn):
-    print("  Читаю states shapefile...")
+def build_countries(zip_path, conn):
+    """Natural Earth ne_50m_admin_0_countries → countries table."""
+    print("  Читаю countries shapefile...")
     fields, records = read_shapefile(zip_path)
-    conn.execute("DROP TABLE IF EXISTS states")
-    conn.execute("""CREATE TABLE states (
-        fips TEXT PRIMARY KEY,
-        name TEXT, abbr TEXT,
-        bbox_minx REAL, bbox_miny REAL, bbox_maxx REAL, bbox_maxy REAL,
-        geometry TEXT
+
+    conn.execute("DROP TABLE IF EXISTS countries")
+    conn.execute("""CREATE TABLE countries (
+        name      TEXT PRIMARY KEY,
+        name_norm TEXT,
+        name_long TEXT,
+        name_long_norm TEXT,
+        admin     TEXT,
+        iso_a2    TEXT,
+        iso_a3    TEXT,
+        geometry  TEXT
     )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_states_name ON states(name)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_states_abbr ON states(abbr)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_countries_norm  ON countries(name_norm)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_countries_iso2  ON countries(iso_a2)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_countries_admin ON countries(admin)")
 
     batch = []
+    seen = set()
     for rec, geom in records:
-        fips = str(rec.get("STATEFP", "")).strip()
-        name = str(rec.get("NAME", "")).strip()
-        abbr = str(rec.get("STUSAB", "")).strip()
-        bx = get_bbox(geom)
-        batch.append((fips, name, abbr, bx[0], bx[1], bx[2], bx[3], json.dumps(geom, separators=(",", ":"))))
-    conn.executemany("INSERT OR REPLACE INTO states VALUES (?,?,?,?,?,?,?,?)", batch)
+        name      = fget(rec, "ADMIN", "NAME")
+        name_long = fget(rec, "NAME_LONG", "FORMAL_EN")
+        iso_a2    = fget(rec, "ISO_A2")
+        iso_a3    = fget(rec, "ISO_A3", "ADM0_A3")
+        admin     = fget(rec, "SOVEREIGNT", "ADMIN")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        batch.append((
+            name, normalize(name),
+            name_long, normalize(name_long),
+            admin, iso_a2.upper(), iso_a3.upper(),
+            json.dumps(geom, separators=(",", ":")),
+        ))
+    conn.executemany("INSERT OR IGNORE INTO countries VALUES (?,?,?,?,?,?,?,?)", batch)
     conn.commit()
-    print(f"  ✓ States: {len(batch)}")
+    print(f"  ✓ Countries: {len(batch)}")
 
 
-def build_counties(zip_path, conn):
-    print("  Читаю counties shapefile...")
+def build_admin1(zip_path, conn):
+    """Natural Earth ne_50m_admin_1_states_provinces → admin1 table.
+    Covers US states, Canadian provinces, and all world subdivisions.
+    """
+    print("  Читаю admin1 (states/provinces) shapefile...")
     fields, records = read_shapefile(zip_path)
-    conn.execute("DROP TABLE IF EXISTS counties")
-    conn.execute("""CREATE TABLE counties (
-        fips TEXT PRIMARY KEY,
-        name TEXT, namelsad TEXT,
-        state_fips TEXT, state_abbr TEXT,
-        bbox_minx REAL, bbox_miny REAL, bbox_maxx REAL, bbox_maxy REAL,
-        geometry TEXT
+
+    conn.execute("DROP TABLE IF EXISTS admin1")
+    conn.execute("""CREATE TABLE admin1 (
+        id        TEXT PRIMARY KEY,
+        name      TEXT,
+        name_norm TEXT,
+        country   TEXT,
+        iso       TEXT,
+        geometry  TEXT
     )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_name ON counties(name)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_state ON counties(state_abbr)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_admin1_norm    ON admin1(name_norm)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_admin1_country ON admin1(country)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_admin1_iso     ON admin1(iso)")
 
     batch = []
+    seen = set()
     for rec, geom in records:
-        sfips = str(rec.get("STATEFP", "")).strip()
-        cfips = str(rec.get("COUNTYFP", "")).strip()
-        fips = sfips + cfips
-        name = str(rec.get("NAME", "")).strip()
-        namelsad = str(rec.get("NAMELSAD", name + " County")).strip()
-        abbr = str(rec.get("STUSAB", "")).strip()
-        bx = get_bbox(geom)
-        batch.append((fips, name, namelsad, sfips, abbr, bx[0], bx[1], bx[2], bx[3], json.dumps(geom, separators=(",", ":"))))
-    conn.executemany("INSERT OR REPLACE INTO counties VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
+        adm_code = fget(rec, "adm1_code", "ADM1_CODE", "code_local")
+        name     = fget(rec, "name", "NAME", "gn_name")
+        country  = fget(rec, "admin", "ADMIN", "sovereignt")
+        iso      = fget(rec, "iso_3166_2", "ISO_3166_2")
+        if not name or not adm_code or adm_code in seen:
+            continue
+        seen.add(adm_code)
+        batch.append((adm_code, name, normalize(name), country, iso.upper(),
+                      json.dumps(geom, separators=(",", ":"))))
+    conn.executemany("INSERT OR IGNORE INTO admin1 VALUES (?,?,?,?,?,?)", batch)
     conn.commit()
-    print(f"  ✓ Counties: {len(batch)}")
+    print(f"  ✓ Admin1: {len(batch)} регионов")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
+def table_count(conn, table):
+    try:
+        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    except Exception:
+        return 0
+
 
 def main():
     manual_zcta = None
@@ -253,16 +294,35 @@ def main():
 
     rebuild = "--rebuild" in sys.argv
 
-    if os.path.exists(DB_PATH) and not rebuild and not manual_zcta:
+    # If DB exists, check what's already there
+    if os.path.exists(DB_PATH) and not rebuild:
         conn = sqlite3.connect(DB_PATH)
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        n_zcta = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0] if "zcta" in tables else 0
-        n_states = conn.execute("SELECT COUNT(*) FROM states").fetchone()[0] if "states" in tables else 0
-        n_counties = conn.execute("SELECT COUNT(*) FROM counties").fetchone()[0] if "counties" in tables else 0
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        n_zcta     = table_count(conn, "zcta")
+        n_countries = table_count(conn, "countries")
+        n_admin1    = table_count(conn, "admin1")
         conn.close()
-        print(f"✅ База уже создана: {n_zcta} ZIP, {n_states} штатов, {n_counties} округов")
-        print("   Для пересоздания: python3 setup.py --rebuild")
-        return True
+
+        if n_zcta > 0 and n_countries > 0 and n_admin1 > 0 and not manual_zcta:
+            print(f"✅ База уже полная: {n_zcta} ZIP · {n_countries} стран · {n_admin1} регионов")
+            print("   Для пересоздания: python3 setup.py --rebuild")
+            return True
+
+        # Partial DB — add only missing tables
+        if n_zcta > 0 and not manual_zcta:
+            print(f"ℹ️  ZCTA уже есть ({n_zcta} ZIP). Добавляю недостающие справочники...\n")
+            if not ensure_pyshp():
+                return False
+            conn = sqlite3.connect(DB_PATH)
+            if n_countries == 0:
+                _download_and_build("4/4 Страны мира", NE_COUNTRIES_URL, build_countries, conn)
+            if n_admin1 == 0:
+                _download_and_build("4/4 Регионы/провинции мира", NE_ADMIN1_URL, build_admin1, conn)
+            conn.close()
+            db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
+            print(f"\n✅ Готово! База: {db_mb:.0f} MB → {DB_PATH}")
+            return True
 
     print("=== ZIP Code Map — первоначальная настройка ===\n")
 
@@ -274,12 +334,23 @@ def main():
         os.remove(DB_PATH)
     conn = sqlite3.connect(DB_PATH)
 
-    # ZCTA
-    print("1/3 ZIP-коды (ZCTA):")
-    zcta_zip = try_sources("zcta", manual_zcta)
+    # 1. ZCTA (US ZIP codes)
+    print("1/4 ZIP-коды (ZCTA):")
+    zcta_zip = None
+    if manual_zcta:
+        if os.path.exists(manual_zcta):
+            zcta_zip = manual_zcta
+        else:
+            print(f"  Файл не найден: {manual_zcta}")
+    else:
+        for url in ZCTA_URLS:
+            zcta_zip = download(url)
+            if zcta_zip:
+                break
+
     if not zcta_zip:
-        print("\n❌ Скачайте вручную: https://www2.census.gov/geo/tiger/GENZ2020/shp/")
-        print("   Файл: cb_2020_us_zcta520_500k.zip")
+        print("\n❌ Скачайте вручную в Safari:")
+        print("   https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip")
         print("   Затем: python3 setup.py --file cb_2020_us_zcta520_500k.zip")
         conn.close()
         return False
@@ -292,38 +363,83 @@ def main():
             except OSError:
                 pass
 
-    # States
-    print("2/3 Штаты:")
-    states_zip = try_sources("states")
-    if states_zip:
-        try:
-            build_states(states_zip, conn)
-        finally:
-            try:
-                os.remove(states_zip)
-            except OSError:
-                pass
-    else:
-        print("  ⚠️ States пропущены (exclusion по штатам недоступно)")
+    # 2. Countries (Natural Earth — S3, no blocking)
+    print("2/4 Страны мира (Natural Earth):")
+    _download_and_build("2/4", NE_COUNTRIES_URL, build_countries, conn)
 
-    # Counties
-    print("3/3 Округа (counties):")
-    counties_zip = try_sources("counties")
-    if counties_zip:
-        try:
-            build_counties(counties_zip, conn)
-        finally:
+    # 3. Admin1 worldwide states/provinces (Natural Earth)
+    print("3/4 Регионы/провинции мира (Natural Earth):")
+    _download_and_build("3/4", NE_ADMIN1_URL, build_admin1, conn)
+
+    # 4. US counties (Census — may be blocked)
+    print("4/4 Округа США (Census Bureau):")
+    county_urls = [
+        "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_county_500k.zip",
+        "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_county_500k.zip",
+    ]
+    got_counties = False
+    for url in county_urls:
+        p = download(url)
+        if p:
             try:
-                os.remove(counties_zip)
-            except OSError:
-                pass
-    else:
-        print("  ⚠️ Counties пропущены (exclusion по округам недоступно)")
+                _build_counties(p, conn)
+                got_counties = True
+            finally:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            break
+    if not got_counties:
+        print("  ⚠️ Округа пропущены (Census заблокирован — ок, данные стран/штатов есть)")
 
     conn.close()
     db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
     print(f"\n✅ Готово!  База данных: {db_mb:.0f} MB → {DB_PATH}")
     return True
+
+
+def _download_and_build(label, url, builder, conn):
+    p = download(url)
+    if p:
+        try:
+            builder(p, conn)
+        finally:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    else:
+        print(f"  ⚠️ Пропущено (ошибка загрузки)")
+
+
+def _build_counties(zip_path, conn):
+    print("  Читаю counties shapefile...")
+    fields, records = read_shapefile(zip_path)
+    conn.execute("DROP TABLE IF EXISTS counties")
+    conn.execute("""CREATE TABLE counties (
+        fips TEXT PRIMARY KEY,
+        name TEXT, namelsad TEXT,
+        state_fips TEXT, state_abbr TEXT,
+        bbox_minx REAL, bbox_miny REAL, bbox_maxx REAL, bbox_maxy REAL,
+        geometry TEXT
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_name  ON counties(name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_state ON counties(state_abbr)")
+    batch = []
+    for rec, geom in records:
+        sfips    = str(rec.get("STATEFP", "")).strip()
+        cfips    = str(rec.get("COUNTYFP", "")).strip()
+        name     = str(rec.get("NAME", "")).strip()
+        namelsad = str(rec.get("NAMELSAD", name + " County")).strip()
+        abbr     = str(rec.get("STUSAB", "")).strip()
+        bx = get_bbox(geom)
+        batch.append((sfips + cfips, name, namelsad, sfips, abbr,
+                      bx[0], bx[1], bx[2], bx[3],
+                      json.dumps(geom, separators=(",", ":"))))
+    conn.executemany("INSERT OR REPLACE INTO counties VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
+    conn.commit()
+    print(f"  ✓ Counties: {len(batch)}")
 
 
 if __name__ == "__main__":
