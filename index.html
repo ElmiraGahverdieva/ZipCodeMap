@@ -169,15 +169,69 @@ let   serverStatus = null;        // /api/status result
 // ── Nominatim rate limiter ────────────────────────────────────────────────────
 let _nomLast = 0;
 async function nominatim(path) {
-  const wait = Math.max(0, 1150 - (Date.now() - _nomLast));
+  const wait = Math.max(0, 1200 - (Date.now() - _nomLast));
   if (wait) await sleep(wait);
   _nomLast = Date.now();
-  const r = await fetch('https://nominatim.openstreetmap.org' + path, {
-    headers: {'Accept-Language':'en-US,en','User-Agent':'ZipCodeMapTool/1.0'}
-  });
-  return r.json();
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org' + path,
+      { headers: { 'Accept-Language': 'en-US,en' } });
+    if (!r.ok) throw new Error(`Nominatim HTTP ${r.status}`);
+    return r.json();
+  } catch(e) {
+    console.warn('Nominatim failed:', path, e.message);
+    return { type:'FeatureCollection', features:[] };
+  }
 }
 
+// ── TIGERweb layer discovery ──────────────────────────────────────────────────
+// Discover state/county layer IDs once from TIGERweb MapServer metadata
+const TIGER_BASE = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb';
+let tigerLayers = null;  // { stateUrl, countyUrl }
+
+async function getTigerLayers() {
+  if (tigerLayers) return tigerLayers;
+
+  // Services to try, in order
+  const services = ['tigerWMS_Census2020', 'tigerWMS_ACS2022', 'tigerWMS_Current'];
+
+  for (const svc of services) {
+    try {
+      const r = await fetch(`${TIGER_BASE}/${svc}/MapServer?f=json`);
+      if (!r.ok) continue;
+      const info = await r.json();
+      const layers = info.layers || [];
+
+      const stLyr  = layers.find(l => /^state/i.test(l.name) && !/sub|equiv/i.test(l.name));
+      const coLyr  = layers.find(l => /^county/i.test(l.name) && !/sub|equiv/i.test(l.name));
+
+      if (stLyr || coLyr) {
+        const base = `${TIGER_BASE}/${svc}/MapServer`;
+        tigerLayers = {
+          stateUrl:  stLyr  ? `${base}/${stLyr.id}/query`  : null,
+          countyUrl: coLyr  ? `${base}/${coLyr.id}/query`  : null,
+        };
+        console.log('TIGERweb layers:', tigerLayers, `(${svc})`);
+        return tigerLayers;
+      }
+    } catch(e) {
+      console.warn('TIGERweb discovery failed for', svc, e.message);
+    }
+  }
+
+  tigerLayers = { stateUrl: null, countyUrl: null };
+  return tigerLayers;
+}
+
+async function tigerQuery(url, where, outFields) {
+  if (!url) return null;
+  try {
+    const params = new URLSearchParams({ where, outFields, outSR:'4326', f:'geojson' });
+    const r = await fetch(`${url}?${params}`);
+    if (!r.ok) return null;
+    const fc = await r.json();
+    return hasPolygon(fc) ? fc : null;
+  } catch { return null; }
+}
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r,ms));
@@ -342,19 +396,8 @@ async function excludeAsCounty(fips, name, stAbbr, stName){
   const label = `${name}${stAbbr?', '+stAbbr:''}`;
   const key = `county:${fips||label}`;
   if(exclusions.has(key)) return;
-
-  const st = await getServerStatus();
-  let fc = null;
-
-  if(fips && st.has_counties){
-    try{ fc = await(await fetch(`/api/search?q=${encodeURIComponent(name+(stAbbr?', '+stAbbr:''))}`)).json(); }catch{}
-  }
-  if(!fc?.features?.length){
-    // Nominatim fallback
-    const q = name + (stAbbr ? ` county ${stAbbr}` : ' county') + ' USA';
-    const r = await nominatim(`/search?q=${encodeURIComponent(q)}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`);
-    fc = r;
-  }
+  const cleanName = name.replace(/\s*county\s*$/i, '');
+  const fc = await fetchCountyBoundary(cleanName, stAbbr);
   if(fc?.features?.length){
     fc.features.forEach(f=>f.properties.display_name=label);
     addExclusion(key, label, fc);
@@ -367,18 +410,7 @@ async function excludeAsState(fips, name, abbr){
   const key = `state:${fips||name}`;
   if(exclusions.has(key)) return;
   const display = name||(abbr?'State '+abbr:'');
-
-  const st = await getServerStatus();
-  let fc = null;
-
-  if(st.has_states){
-    try{ fc = await(await fetch(`/api/search?q=${encodeURIComponent(abbr||name)}`)).json(); }catch{}
-  }
-  if(!fc?.features?.length){
-    const q = (name||abbr) + ' state USA';
-    const r = await nominatim(`/search?q=${encodeURIComponent(q)}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`);
-    fc = r;
-  }
+  const fc = await fetchStateBoundary(abbr || name);
   if(fc?.features?.length){
     fc.features.forEach(f=>f.properties.display_name=display);
     addExclusion(key, display, fc);
@@ -494,10 +526,43 @@ function hasPolygon(fc) {
   );
 }
 
-async function nomSearch(query, featuretype) {
-  let path = `/search?q=${encodeURIComponent(query)}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`;
-  if (featuretype) path += `&featuretype=${featuretype}`;
-  return nominatim(path);
+async function nomSearch(query, opts = {}) {
+  const p = new URLSearchParams({ q:query, format:'geojson', polygon_geojson:'1', limit:'1' });
+  if (opts.countrycodes) p.set('countrycodes', opts.countrycodes);
+  if (opts.featuretype)  p.set('featuretype',  opts.featuretype);
+  return nominatim(`/search?${p}`);
+}
+
+// Fetch US state boundary: TIGERweb → local DB → Nominatim
+async function fetchStateBoundary(name) {
+  const tl = await getTigerLayers();
+  if (tl.stateUrl) {
+    const safe  = name.replace(/'/g, "''");
+    const where = name.length === 2
+      ? `STUSAB='${safe.toUpperCase()}'`
+      : `NAME='${safe}'`;
+    const fc = await tigerQuery(tl.stateUrl, where, 'NAME,STUSAB');
+    if (fc) return fc;
+  }
+  const local = await searchLocal(name);
+  if (local) return local;
+  return nomSearch(name + ' state', { countrycodes:'us' });
+}
+
+// Fetch US county boundary: TIGERweb → local DB → Nominatim
+async function fetchCountyBoundary(name, state) {
+  const tl = await getTigerLayers();
+  if (tl.countyUrl) {
+    const safe  = name.replace(/'/g, "''");
+    let where   = `NAME='${safe}'`;
+    if (state) where += ` AND STUSAB='${state.toUpperCase()}'`;
+    const fc = await tigerQuery(tl.countyUrl, where, 'NAME,STUSAB,NAMELSAD');
+    if (fc) return fc;
+  }
+  const q = name + ' county' + (state ? ` ${state}` : '');
+  const local = await searchLocal(q);
+  if (local) return local;
+  return nomSearch(q + ' USA', { countrycodes:'us' });
 }
 
 async function searchLocal(q) {
@@ -561,14 +626,13 @@ async function loadExcluded() {
     }
   }
 
-  // ── 2. States — local DB first, Nominatim fallback ──
+  // ── 2. States — TIGERweb → local DB → Nominatim ──
   if (byType.state.length) {
     tick('Штаты');
     for (const item of byType.state) {
       if (exclusions.has(item.key)) { done++; tick('Штаты'); continue; }
       try {
-        let fc = await searchLocal(item.name);
-        if (!fc) fc = await nomSearch(item.name, 'state');
+        const fc = await fetchStateBoundary(item.name);
         if (hasPolygon(fc)) {
           fc.features.forEach(f => f.properties.display_name = item.display);
           addExclusion(item.key, item.display, fc);
@@ -579,14 +643,13 @@ async function loadExcluded() {
     }
   }
 
-  // ── 3. Counties — local DB first, Nominatim fallback ──
+  // ── 3. Counties — TIGERweb → local DB → Nominatim ──
   if (byType.county.length) {
     tick('Округа');
     for (const item of byType.county) {
       if (exclusions.has(item.key)) { done++; tick('Округа'); continue; }
       try {
-        let fc = await searchLocal(item.query);
-        if (!fc) fc = await nomSearch(item.query);  // e.g. "Greene County, Alabama"
+        const fc = await fetchCountyBoundary(item.name, item.state);
         if (hasPolygon(fc)) {
           fc.features.forEach(f => f.properties.display_name = item.display);
           addExclusion(item.key, item.display, fc);
@@ -597,14 +660,15 @@ async function loadExcluded() {
     }
   }
 
-  // ── 4. Places / cities / congressional districts ──
+  // ── 4. Places / cities / congressional districts / international ──
   if (byType.place.length) {
     tick('Места');
     for (const item of byType.place) {
       if (exclusions.has(item.key)) { done++; tick('Места'); continue; }
       try {
         let fc = await searchLocal(item.query);
-        if (!fc) fc = await nomSearch(item.query);
+        if (!fc) fc = await nomSearch(item.query, { countrycodes:'us' });
+        if (!fc) fc = await nomSearch(item.query);  // international fallback (no countrycodes)
         if (hasPolygon(fc)) {
           const label = fc.features[0].properties.display_name?.split(',')[0] || item.display;
           fc.features.forEach(f => f.properties.display_name = label);
