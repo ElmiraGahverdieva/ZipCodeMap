@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZIP Code Map Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────── */
+    #sidebar {
+      width: 340px;
+      min-width: 280px;
+      padding: 20px 16px;
+      background: #16213e;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      border-right: 1px solid #0f3460;
+      box-shadow: 4px 0 12px rgba(0,0,0,.4);
+      z-index: 1000;
+    }
+
+    #sidebar h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #4fc3f7;
+      letter-spacing: .5px;
+    }
+
+    #sidebar p.hint {
+      font-size: 12px;
+      color: #90a4ae;
+      line-height: 1.5;
+    }
+
+    textarea {
+      width: 100%;
+      height: 220px;
+      padding: 10px;
+      font-size: 12.5px;
+      font-family: "Courier New", monospace;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      background: #0d1b2a;
+      color: #cfd8dc;
+      resize: vertical;
+      outline: none;
+      transition: border-color .2s;
+    }
+    textarea:focus { border-color: #4fc3f7; }
+
+    .btn-row { display: flex; gap: 8px; }
+
+    button {
+      flex: 1;
+      padding: 10px 6px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: opacity .15s, transform .1s;
+    }
+    button:active { transform: scale(.97); }
+    button:hover { opacity: .88; }
+
+    #btnLoad   { background: #1565c0; color: #fff; }
+    #btnClear  { background: #b71c1c; color: #fff; }
+
+    /* ── Status / Stats ──────────────────────────────────── */
+    #statusBox {
+      font-size: 12px;
+      min-height: 18px;
+      color: #80cbc4;
+    }
+
+    #statsBox {
+      font-size: 12px;
+      color: #90a4ae;
+      line-height: 1.6;
+    }
+
+    .progress-wrap {
+      background: #0d1b2a;
+      border-radius: 4px;
+      height: 6px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: #4fc3f7;
+      width: 0%;
+      transition: width .3s;
+    }
+
+    /* ── Legend ──────────────────────────────────────────── */
+    .legend {
+      font-size: 11px;
+      color: #78909c;
+      line-height: 1.6;
+      border-top: 1px solid #0f3460;
+      padding-top: 10px;
+    }
+    .legend span.dot {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border-radius: 2px;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+
+    /* ── Map ─────────────────────────────────────────────── */
+    #map {
+      flex: 1;
+      z-index: 1;
+    }
+
+    /* Leaflet tooltip style */
+    .leaflet-tooltip {
+      background: #1a237e;
+      border: 1px solid #3f51b5;
+      color: #e8eaf6;
+      font-weight: 700;
+      font-size: 13px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.5);
+    }
+    .leaflet-tooltip::before { display: none; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>📍 ZIP Code Map</h1>
+
+  <p class="hint">
+    Вставьте список ZIP-кодов — по одному на строку.<br>
+    Поддерживаемые форматы:<br>
+    <code>16112, Pennsylvania, United States</code><br>
+    <code>16112</code>
+  </p>
+
+  <textarea id="zipInput" placeholder="16112, Pennsylvania, United States&#10;16116, Pennsylvania, United States&#10;&#10;или просто:&#10;16112&#10;16116&#10;90210"></textarea>
+
+  <div class="btn-row">
+    <button id="btnLoad"  onclick="loadZipCodes()">▶ Показать на карте</button>
+    <button id="btnClear" onclick="clearMap()">✕ Очистить</button>
+  </div>
+
+  <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+  <div id="statusBox">Готов к работе</div>
+  <div id="statsBox"></div>
+
+  <div class="legend">
+    <div><span class="dot" style="background:rgba(79,195,247,.35);border:1.5px solid #4fc3f7"></span>ZIP-зона (ZCTA)</div>
+    <div style="margin-top:4px"><span class="dot" style="background:rgba(79,195,247,.65);border:2px solid #81d4fa"></span>При наведении</div>
+    <br>
+    Источник границ: US Census Bureau TIGERweb
+  </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Map init ─────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView([39.5, -98.35], 5);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO',
+  subdomains: 'abcd',
+  maxZoom: 19
+}).addTo(map);
+
+const zipLayer = L.featureGroup().addTo(map);
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setStatus(msg) { document.getElementById('statusBox').textContent = msg; }
+function setProgress(pct) { document.getElementById('progressBar').style.width = pct + '%'; }
+function setStats(html)  { document.getElementById('statsBox').innerHTML = html; }
+
+// ── Parse input ───────────────────────────────────────────────────────────────
+function parseZipCodes(text) {
+  const zips = new Set();
+  for (const line of text.split(/\n/)) {
+    // grab first 5-digit number found on the line
+    const m = line.match(/\b(\d{5})\b/);
+    if (m) zips.add(m[1]);
+  }
+  return [...zips];
+}
+
+// ── TIGERweb query ────────────────────────────────────────────────────────────
+const TIGER_URL =
+  'https://tigerweb.geo.census.gov/arcgis/rest/services/' +
+  'TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer/2/query';
+
+async function queryBatch(zipBatch) {
+  const where = `ZCTA5CE20 IN (${zipBatch.map(z => `'${z}'`).join(',')})`;
+  const params = new URLSearchParams({
+    where,
+    outFields: 'ZCTA5CE20',
+    outSR: '4326',
+    f: 'geojson'
+  });
+  const resp = await fetch(`${TIGER_URL}?${params}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ── GeoJSON layer builder ─────────────────────────────────────────────────────
+function buildGeoJsonLayer(geojson) {
+  return L.geoJSON(geojson, {
+    style: {
+      color:       '#4fc3f7',
+      fillColor:   '#4fc3f7',
+      fillOpacity: 0.25,
+      weight:      1.5
+    },
+    onEachFeature(feature, layer) {
+      const zip = feature.properties.ZCTA5CE20;
+      layer.bindTooltip(zip, { sticky: true, offset: [10, 0] });
+
+      layer.on('mouseover', function () {
+        this.setStyle({ fillOpacity: 0.55, weight: 2.5, color: '#81d4fa' });
+      });
+      layer.on('mouseout', function () {
+        this.setStyle({ fillOpacity: 0.25, weight: 1.5, color: '#4fc3f7' });
+      });
+    }
+  });
+}
+
+// ── Main load ─────────────────────────────────────────────────────────────────
+async function loadZipCodes() {
+  const input = document.getElementById('zipInput').value.trim();
+  const zips  = parseZipCodes(input);
+
+  if (zips.length === 0) {
+    setStatus('Не найдено ни одного 5-значного ZIP-кода. Проверьте формат.');
+    return;
+  }
+
+  clearMap();
+  setProgress(0);
+
+  const BATCH = 500;                          // Census API limit ~1000, 500 — safe
+  const batches = [];
+  for (let i = 0; i < zips.length; i += BATCH) batches.push(zips.slice(i, i + BATCH));
+
+  let loaded   = 0;
+  let notFound = [];
+  let errors   = 0;
+
+  for (let i = 0; i < batches.length; i++) {
+    setStatus(`Загрузка батча ${i + 1} из ${batches.length}…`);
+    setProgress(Math.round(((i) / batches.length) * 100));
+
+    try {
+      const geojson   = await queryBatch(batches[i]);
+      const foundSet  = new Set(geojson.features.map(f => f.properties.ZCTA5CE20));
+      const missing   = batches[i].filter(z => !foundSet.has(z));
+
+      notFound.push(...missing);
+      loaded += foundSet.size;
+
+      if (geojson.features.length > 0) {
+        buildGeoJsonLayer(geojson).addTo(zipLayer);
+      }
+    } catch (err) {
+      console.error('Batch error:', err);
+      errors += batches[i].length;
+    }
+  }
+
+  setProgress(100);
+
+  // Fit map to all loaded polygons
+  if (zipLayer.getLayers().length > 0) {
+    map.fitBounds(zipLayer.getBounds(), { padding: [30, 30] });
+  }
+
+  // Summary
+  const lines = [
+    `✅ Загружено: <b>${loaded}</b> из <b>${zips.length}</b> ZIP-кодов`,
+    notFound.length > 0
+      ? `⚠️ Не найдено: <b>${notFound.length}</b>${notFound.length <= 30 ? ' — ' + notFound.join(', ') : ''}`
+      : '',
+    errors > 0 ? `❌ Ошибки запроса: ${errors}` : ''
+  ].filter(Boolean);
+
+  setStatus('Готово.');
+  setStats(lines.join('<br>'));
+}
+
+// ── Clear ─────────────────────────────────────────────────────────────────────
+function clearMap() {
+  zipLayer.clearLayers();
+  setProgress(0);
+  setStatus('Карта очищена.');
+  setStats('');
+}
+</script>
+</body>
+</html>
