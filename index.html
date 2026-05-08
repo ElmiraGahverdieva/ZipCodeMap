@@ -133,6 +133,25 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+// ── US state lookup (for classification) ─────────────────────────────────────
+const US_STATE_NAMES = new Set([
+  'alabama','alaska','arizona','arkansas','california','colorado','connecticut',
+  'delaware','florida','georgia','hawaii','idaho','illinois','indiana','iowa',
+  'kansas','kentucky','louisiana','maine','maryland','massachusetts','michigan',
+  'minnesota','mississippi','missouri','montana','nebraska','nevada',
+  'new hampshire','new jersey','new mexico','new york','north carolina',
+  'north dakota','ohio','oklahoma','oregon','pennsylvania','rhode island',
+  'south carolina','south dakota','tennessee','texas','utah','vermont',
+  'virginia','washington','west virginia','wisconsin','wyoming',
+  'district of columbia'
+]);
+const US_STATE_ABBRS = new Set([
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+  'VA','WA','WV','WI','WY','DC'
+]);
+
 // ── Map ───────────────────────────────────────────────────────────────────────
 const map = L.map('map').setView([39.5,-98.35],5);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
@@ -427,52 +446,180 @@ async function loadIncluded(){
   setStat('iStat', p.join(' · '));
 }
 
-// ── Load excluded ─────────────────────────────────────────────────────────────
-async function loadExcluded(){
-  const lines = $('excInput').value.split('\n').map(l=>l.trim()).filter(Boolean);
-  if(!lines.length){ setStat('eStat','Нет данных'); return; }
-  setProg('eProg',2);
+// ── Input classifier ─────────────────────────────────────────────────────────
+// Returns {type, zip|name|query, state, display, key}
+function classifyExcLine(raw) {
+  // Strip trailing "United States" / "USA" and normalize
+  let line = raw
+    .replace(/,?\s*(united states of america|united states|usa)\s*$/i, '')
+    .replace(/,\s*$/, '')
+    .trim();
+  if (!line) return null;
 
-  let done=0, err=0;
-  for(const line of lines){
-    setStat('eStat',`Ищу: ${line}…`);
-    try{
-      // Try local API first, then Nominatim
-      const isZip = /^\d{5}$/.test(line);
-      const key = `search:${line}`;
-      if(exclusions.has(key)){ done++; continue; }
+  // Split on commas
+  const parts = line.split(/\s*,\s*/);
+  const first = parts[0].trim();
 
-      let fc = null;
-      if(isZip){
-        fc = await(await fetch(`/api/zcta?zips=${line}`)).json();
-        fc.features.forEach(f=>f.properties.display_name=`ZIP ${line}`);
-      } else {
-        const local = await(await fetch(`/api/search?q=${encodeURIComponent(line)}`)).json();
-        if(local.features?.length){
-          fc = local;
-        } else {
-          // Nominatim fallback
-          const r = await nominatim(`/search?q=${encodeURIComponent(line+' USA')}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`);
-          if(r.features?.length){
-            const name = r.features[0].properties.display_name?.split(',')[0]||line;
-            r.features.forEach(f=>f.properties.display_name=name);
-            fc = r;
-          }
-        }
-      }
-
-      if(fc?.features?.length){
-        const name = fc.features[0].properties.display_name||line;
-        addExclusion(key, name, fc);
-        done++;
-      } else { err++; }
-    }catch(e){ err++; console.error(line,e); }
-    setProg('eProg', Math.round(5 + (done+err)/lines.length*90));
+  // ── ZIP code (5 digits at start) ──
+  if (/^\d{5}$/.test(first)) {
+    return { raw, type:'zip', zip:first, display:`ZIP ${first}`, key:`zip:${first}` };
   }
-  setProg('eProg',100);
-  const p=[`✅ <b>${done}</b> загружено`];
-  if(err) p.push(`⚠️ не найдено: <b>${err}</b>`);
-  setStat('eStat', p.join(' · '));
+
+  // ── County: first segment ends with "County" ──
+  if (/\bcounty\b/i.test(first)) {
+    const countyName = first.replace(/\s*county\s*$/i, '').trim();
+    const state = parts.length > 1 ? parts[parts.length - 1].trim() : '';
+    const display = first + (state ? `, ${state}` : '');
+    return { raw, type:'county', name:countyName, state, display,
+             query: first + (state ? `, ${state}` : ''),
+             key: `county:${display.toLowerCase()}` };
+  }
+
+  // ── State: single token that is a known state name or abbreviation ──
+  if (parts.length === 1) {
+    if (US_STATE_NAMES.has(first.toLowerCase()) || US_STATE_ABBRS.has(first.toUpperCase())) {
+      return { raw, type:'state', name:first, display:first,
+               key:`state:${first.toLowerCase()}` };
+    }
+  }
+
+  // ── City / place / congressional district / other ──
+  return { raw, type:'place', query:line, display:first || line,
+           key:`place:${line.toLowerCase()}` };
+}
+
+function hasPolygon(fc) {
+  return fc?.features?.some(f =>
+    f?.geometry?.type === 'Polygon' || f?.geometry?.type === 'MultiPolygon'
+  );
+}
+
+async function nomSearch(query, featuretype) {
+  let path = `/search?q=${encodeURIComponent(query)}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`;
+  if (featuretype) path += `&featuretype=${featuretype}`;
+  return nominatim(path);
+}
+
+async function searchLocal(q) {
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const fc = await r.json();
+    return hasPolygon(fc) ? fc : null;
+  } catch { return null; }
+}
+
+// ── Load excluded ─────────────────────────────────────────────────────────────
+async function loadExcluded() {
+  const rawLines = $('excInput').value.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!rawLines.length) { setStat('eStat','Нет данных'); return; }
+
+  // Classify all lines first — show summary before starting
+  const items = rawLines.map(classifyExcLine).filter(Boolean);
+  const byType = {
+    zip:    items.filter(i => i.type === 'zip'),
+    state:  items.filter(i => i.type === 'state'),
+    county: items.filter(i => i.type === 'county'),
+    place:  items.filter(i => i.type === 'place'),
+  };
+  const total = items.length;
+  const summary = [
+    byType.zip.length    && `${byType.zip.length} ZIP`,
+    byType.state.length  && `${byType.state.length} штатов`,
+    byType.county.length && `${byType.county.length} округов`,
+    byType.place.length  && `${byType.place.length} мест`,
+  ].filter(Boolean).join(', ');
+  setStat('eStat', `Найдено: ${summary}`);
+  setProg('eProg', 2);
+  await sleep(300);
+
+  let done = 0, err = 0;
+  const tick = (label) => {
+    setProg('eProg', Math.round(5 + (done + err) / total * 90));
+    setStat('eStat', `${label} (${done + err}/${total})…`);
+  };
+
+  // ── 1. ZIPs — batched local DB, very fast ──
+  if (byType.zip.length) {
+    tick(`ZIP-коды`);
+    const newZips = byType.zip.filter(i => !exclusions.has(i.key));
+    const BATCH = 400;
+    for (let i = 0; i < newZips.length; i += BATCH) {
+      const batch = newZips.slice(i, i + BATCH);
+      try {
+        const fc = await (await fetch(`/api/zcta?zips=${batch.map(z=>z.zip).join(',')}`)).json();
+        const foundSet = new Set(fc.features.map(f => f.properties.ZCTA5CE20 || f.properties.zip));
+        for (const item of batch) {
+          if (foundSet.has(item.zip)) {
+            const feat = fc.features.find(f => (f.properties.ZCTA5CE20||f.properties.zip) === item.zip);
+            feat.properties.display_name = item.display;
+            addExclusion(item.key, item.display, { type:'FeatureCollection', features:[feat] });
+            done++;
+          } else err++;
+        }
+      } catch { err += batch.length; }
+      tick('ZIP-коды');
+    }
+  }
+
+  // ── 2. States — local DB first, Nominatim fallback ──
+  if (byType.state.length) {
+    tick('Штаты');
+    for (const item of byType.state) {
+      if (exclusions.has(item.key)) { done++; tick('Штаты'); continue; }
+      try {
+        let fc = await searchLocal(item.name);
+        if (!fc) fc = await nomSearch(item.name, 'state');
+        if (hasPolygon(fc)) {
+          fc.features.forEach(f => f.properties.display_name = item.display);
+          addExclusion(item.key, item.display, fc);
+          done++;
+        } else err++;
+      } catch { err++; }
+      tick('Штаты');
+    }
+  }
+
+  // ── 3. Counties — local DB first, Nominatim fallback ──
+  if (byType.county.length) {
+    tick('Округа');
+    for (const item of byType.county) {
+      if (exclusions.has(item.key)) { done++; tick('Округа'); continue; }
+      try {
+        let fc = await searchLocal(item.query);
+        if (!fc) fc = await nomSearch(item.query);  // e.g. "Greene County, Alabama"
+        if (hasPolygon(fc)) {
+          fc.features.forEach(f => f.properties.display_name = item.display);
+          addExclusion(item.key, item.display, fc);
+          done++;
+        } else err++;
+      } catch { err++; }
+      tick('Округа');
+    }
+  }
+
+  // ── 4. Places / cities / congressional districts ──
+  if (byType.place.length) {
+    tick('Места');
+    for (const item of byType.place) {
+      if (exclusions.has(item.key)) { done++; tick('Места'); continue; }
+      try {
+        let fc = await searchLocal(item.query);
+        if (!fc) fc = await nomSearch(item.query);
+        if (hasPolygon(fc)) {
+          const label = fc.features[0].properties.display_name?.split(',')[0] || item.display;
+          fc.features.forEach(f => f.properties.display_name = label);
+          addExclusion(item.key, label, fc);
+          done++;
+        } else err++;
+      } catch { err++; }
+      tick('Места');
+    }
+  }
+
+  setProg('eProg', 100);
+  const parts = [`✅ <b>${done}</b>/${total} загружено`];
+  if (err) parts.push(`⚠️ не найдено: <b>${err}</b>`);
+  setStat('eStat', parts.join(' · '));
 }
 
 // ── Clear ─────────────────────────────────────────────────────────────────────
