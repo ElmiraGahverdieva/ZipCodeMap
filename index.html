@@ -10,99 +10,82 @@
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
          display:flex;height:100vh;overflow:hidden;background:#f0f2f5}
 
-    /* ── Sidebar ─────────────────────────────────────────── */
+    /* ── Sidebar ──────────────────────────────────────────────── */
     #sidebar{
-      width:320px;min-width:260px;
-      display:flex;flex-direction:column;
+      width:300px;min-width:240px;display:flex;flex-direction:column;
       background:#fff;border-right:1px solid #dde1e7;
       box-shadow:2px 0 8px rgba(0,0,0,.08);z-index:1000;overflow:hidden
     }
-
-    .panel{display:flex;flex-direction:column;gap:8px;padding:14px 12px;flex:1;min-height:0;overflow:hidden}
+    .panel{
+      display:flex;flex-direction:column;gap:7px;
+      padding:12px 11px;flex:1;min-height:0;overflow:hidden
+    }
     .panel+.panel{border-top:2px solid #e8eaed}
 
     .panel-title{
-      font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
-      display:flex;align-items:center;gap:6px
+      font-size:11px;font-weight:700;letter-spacing:.5px;
+      text-transform:uppercase;display:flex;align-items:center;gap:5px;flex-shrink:0
     }
-    .panel-title .dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
-    .dot-blue{background:#1a73e8}
-    .dot-red {background:#d93025}
+    .dot{width:11px;height:11px;border-radius:2px;flex-shrink:0}
+    .dot-blue{background:#1a73e8}.dot-red{background:#d93025}
 
     textarea{
-      flex:1;min-height:80px;
-      padding:8px 9px;font-size:12px;font-family:"SF Mono","Courier New",monospace;
+      flex:1;min-height:60px;padding:7px 8px;
+      font-size:11.5px;font-family:"SF Mono","Courier New",monospace;
       border:1px solid #dadce0;border-radius:5px;background:#fafafa;
       color:#202124;resize:none;outline:none;line-height:1.55;transition:border-color .15s
     }
-    textarea:focus{border-color:inherit;background:#fff}
-    #incInput:focus{border-color:#1a73e8}
-    #excInput:focus{border-color:#d93025}
+    #incInput:focus{border-color:#1a73e8;background:#fff}
+    #excInput:focus{border-color:#d93025;background:#fff}
 
-    .btn-row{display:flex;gap:6px;flex-shrink:0}
+    .btn-row{display:flex;gap:5px;flex-shrink:0}
     button{
-      flex:1;padding:8px 4px;border:none;border-radius:5px;cursor:pointer;
-      font-size:12px;font-weight:600;transition:opacity .15s
+      flex:1;padding:7px 4px;border:none;border-radius:5px;cursor:pointer;
+      font-size:11.5px;font-weight:600;transition:opacity .15s
     }
-    button:hover{opacity:.85}
-    button:active{transform:scale(.97)}
-
-    .btn-load-inc{background:#1a73e8;color:#fff}
-    .btn-load-exc{background:#d93025;color:#fff}
-    .btn-clear   {background:#fff;color:#5f6368;border:1px solid #dadce0}
+    button:hover{opacity:.85} button:active{transform:scale(.97)}
+    .btn-inc{background:#1a73e8;color:#fff}
+    .btn-exc{background:#d93025;color:#fff}
+    .btn-clr{background:#fff;color:#5f6368;border:1px solid #dadce0}
 
     .prog-wrap{background:#e8eaed;border-radius:3px;height:3px;flex-shrink:0}
-    .prog-bar {height:100%;border-radius:3px;width:0%;transition:width .3s}
-    .prog-blue{background:#1a73e8}
-    .prog-red {background:#d93025}
-
+    .prog-bar{height:100%;border-radius:3px;width:0%;transition:width .3s}
+    .pb-blue{background:#1a73e8}.pb-red{background:#d93025}
     .status{font-size:11px;color:#5f6368;min-height:14px;flex-shrink:0}
-    .status b{color:#3c4043}
+    .status b{color:#202124}
 
-    /* ── Legend ──────────────────────────────────────────── */
-    #legend{
-      padding:10px 12px;border-top:1px solid #e8eaed;
-      font-size:11px;color:#80868b;line-height:1.8;flex-shrink:0
-    }
-    .leg-row{display:flex;align-items:center;gap:6px}
-    .swatch{width:16px;height:10px;border-radius:2px;flex-shrink:0}
+    /* ── Legend ───────────────────────────────────────────────── */
+    #legend{padding:9px 11px;border-top:1px solid #e8eaed;font-size:10.5px;color:#80868b;line-height:1.9;flex-shrink:0}
+    .leg{display:flex;align-items:center;gap:5px}
+    .sw{width:14px;height:9px;border-radius:2px;flex-shrink:0}
 
-    /* ── Map ─────────────────────────────────────────────── */
+    /* ── Map ──────────────────────────────────────────────────── */
     #map{flex:1}
 
-    /* ── Floating tooltip ────────────────────────────────── */
-    #floatTip{
-      position:fixed;display:none;z-index:9999;
+    /* ── Floating tooltip ─────────────────────────────────────── */
+    #ft{
+      position:fixed;display:none;z-index:9999;min-width:170px;max-width:240px;
       background:#fff;border:1px solid #dadce0;border-radius:8px;
-      box-shadow:0 4px 16px rgba(0,0,0,.18);
-      font-size:12px;min-width:160px;pointer-events:none
+      box-shadow:0 4px 16px rgba(0,0,0,.18);font-size:12px;pointer-events:none
     }
-    #floatTip.active{display:block;pointer-events:auto}
-    #floatTip .tip-head{
-      padding:8px 12px 6px;font-weight:700;font-size:13px;color:#202124;
-      border-bottom:1px solid #f1f3f4
+    #ft.on{display:block;pointer-events:auto}
+    #ft .fh{padding:8px 12px 5px;font-weight:700;font-size:13px;border-bottom:1px solid #f1f3f4}
+    #ft .fs{padding:3px 12px 4px;color:#5f6368;font-size:11px;min-height:18px}
+    #ft .fa{padding:5px 7px 7px;display:flex;flex-direction:column;gap:3px}
+    .tb{
+      width:100%;padding:5px 9px;border:none;border-radius:5px;text-align:left;
+      cursor:pointer;font-size:11.5px;font-weight:500;transition:background .1s
     }
-    #floatTip .tip-sub{padding:4px 12px;color:#5f6368;font-size:11px}
-    #floatTip .tip-actions{padding:6px 8px 8px;display:flex;flex-direction:column;gap:3px}
-    .tip-btn{
-      width:100%;padding:6px 10px;border:none;border-radius:5px;
-      text-align:left;cursor:pointer;font-size:12px;font-weight:500;
-      transition:background .1s
-    }
-    .tip-btn-exc{background:#fff3f3;color:#d93025}
-    .tip-btn-exc:hover{background:#fce8e6}
-    .tip-btn-rem{background:#f1f8ff;color:#1a73e8}
-    .tip-btn-rem:hover{background:#e8f0fe}
-    .tip-btn-close{background:#f8f9fa;color:#5f6368;font-size:11px}
-    .tip-btn-close:hover{background:#f1f3f4}
+    .tb-r{background:#fff3f3;color:#c62828}.tb-r:hover{background:#fce8e6}
+    .tb-b{background:#e8f0fe;color:#1558b0}.tb-b:hover{background:#d2e3fc}
+    .tb-g{background:#f8f9fa;color:#5f6368}.tb-g:hover{background:#f1f3f4}
 
-    /* Leaflet tooltip override */
     .leaflet-tooltip{
-      background:#1a73e8;border:none;color:#fff;
-      font-weight:700;font-size:12px;padding:3px 8px;border-radius:4px;
-      box-shadow:0 2px 6px rgba(0,0,0,.25);pointer-events:none
+      background:#1a73e8;border:none;color:#fff;font-weight:700;
+      font-size:12px;padding:3px 8px;border-radius:4px;
+      box-shadow:0 2px 6px rgba(0,0,0,.2);pointer-events:none
     }
-    .leaflet-tooltip.exc-tip{background:#c62828}
+    .leaflet-tooltip.rt{background:#c62828}
     .leaflet-tooltip::before{display:none}
   </style>
 </head>
@@ -110,380 +93,391 @@
 
 <div id="sidebar">
 
-  <!-- ── INCLUDED ──────────────────────────────────────── -->
-  <div class="panel" id="incPanel">
-    <div class="panel-title">
-      <span class="dot dot-blue"></span>
-      Included areas
-    </div>
-    <textarea id="incInput"
-      placeholder="Вставьте ZIP-коды:&#10;16112, Pennsylvania, United States&#10;16116&#10;90210"></textarea>
+  <div class="panel">
+    <div class="panel-title"><span class="dot dot-blue"></span>Included areas</div>
+    <textarea id="incInput" placeholder="ZIP-коды:&#10;16112, Pennsylvania, US&#10;16116&#10;90210"></textarea>
     <div class="btn-row">
-      <button class="btn-load-inc" onclick="loadIncluded()">▶ Показать</button>
-      <button class="btn-clear"    onclick="clearIncluded()">✕</button>
+      <button class="btn-inc" onclick="loadIncluded()">▶ Показать</button>
+      <button class="btn-clr" onclick="clearIncluded()">✕</button>
     </div>
-    <div class="prog-wrap"><div class="prog-bar prog-blue" id="incProg"></div></div>
-    <div class="status" id="incStatus">Готов</div>
+    <div class="prog-wrap"><div class="prog-bar pb-blue" id="iProg"></div></div>
+    <div class="status" id="iStat">Готов</div>
   </div>
 
-  <!-- ── EXCLUDED ──────────────────────────────────────── -->
-  <div class="panel" id="excPanel">
-    <div class="panel-title">
-      <span class="dot dot-red"></span>
-      Excluded areas
-    </div>
-    <textarea id="excInput"
-      placeholder="ZIP, штат, округ:&#10;16117&#10;PA&#10;Pennsylvania&#10;Allegheny County, PA&#10;Lawrence County"></textarea>
+  <div class="panel">
+    <div class="panel-title"><span class="dot dot-red"></span>Excluded areas</div>
+    <textarea id="excInput" placeholder="ZIP, штат, округ, город:&#10;16117&#10;PA&#10;Pennsylvania&#10;Allegheny County, PA&#10;Lawrence County&#10;Pittsburgh"></textarea>
     <div class="btn-row">
-      <button class="btn-load-exc" onclick="loadExcluded()">▶ Показать</button>
-      <button class="btn-clear"    onclick="clearExcluded()">✕</button>
+      <button class="btn-exc" onclick="loadExcluded()">▶ Показать</button>
+      <button class="btn-clr" onclick="clearExcluded()">✕</button>
     </div>
-    <div class="prog-wrap"><div class="prog-bar prog-red" id="excProg"></div></div>
-    <div class="status" id="excStatus">Готов</div>
+    <div class="prog-wrap"><div class="prog-bar pb-red" id="eProg"></div></div>
+    <div class="status" id="eStat">Готов</div>
   </div>
 
-  <!-- ── Legend ───────────────────────────────────────── -->
   <div id="legend">
-    <div class="leg-row">
-      <span class="swatch" style="background:rgba(26,115,232,.25);border:1.5px solid #1a73e8"></span>
-      Включённые ZIP-зоны
-    </div>
-    <div class="leg-row">
-      <span class="swatch" style="background:rgba(198,40,40,.28);border:1.5px solid #d93025"></span>
-      Исключённые области
-    </div>
-    <div class="leg-row">
-      <span class="swatch" style="background:rgba(198,40,40,.55);border:2px solid #b71c1c"></span>
-      Пересечение (блокировка)
-    </div>
-    <div style="margin-top:4px;font-size:10px">
-      Наведите на зону → меню исключения
-    </div>
+    <div class="leg"><span class="sw" style="background:rgba(26,115,232,.22);border:1.5px solid #1a73e8"></span>Включённые ZIP</div>
+    <div class="leg"><span class="sw" style="background:rgba(198,40,40,.28);border:1.5px solid #d93025"></span>Исключённые зоны</div>
+    <div class="leg"><span class="sw" style="background:rgba(198,40,40,.55);border:2px solid #b71c1c"></span>Пересечение — блокировка</div>
+    <div style="margin-top:3px;font-size:10px">Наведите на зону → меню исключения</div>
   </div>
 </div>
 
 <div id="map"></div>
 
-<!-- Floating tooltip -->
-<div id="floatTip">
-  <div class="tip-head" id="tipHead"></div>
-  <div class="tip-sub"  id="tipSub"></div>
-  <div class="tip-actions" id="tipActions"></div>
+<div id="ft">
+  <div class="fh" id="fh"></div>
+  <div class="fs" id="fs"></div>
+  <div class="fa" id="fa"></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ── Map ───────────────────────────────────────────────────────────────────────
-const map = L.map('map').setView([39.5, -98.35], 5);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution:'© OpenStreetMap © CARTO', subdomains:'abcd', maxZoom:19
+const map = L.map('map').setView([39.5,-98.35],5);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
 }).addTo(map);
 
-const incLayer = L.featureGroup().addTo(map);   // blue – included
-const excLayer = L.featureGroup().addTo(map);   // red  – excluded
+const incLayer = L.featureGroup().addTo(map);
+const excLayer = L.featureGroup().addTo(map);
 
 // ── State ─────────────────────────────────────────────────────────────────────
-// Map: exclusionKey → { displayName, leafletLayer }
-const exclusions = new Map();
+const exclusions   = new Map();   // key → {name, lyr}
+const zipCtxCache  = new Map();   // zip → context object
+let   serverStatus = null;        // /api/status result
+
+// ── Nominatim rate limiter ────────────────────────────────────────────────────
+let _nomLast = 0;
+async function nominatim(path) {
+  const wait = Math.max(0, 1150 - (Date.now() - _nomLast));
+  if (wait) await sleep(wait);
+  _nomLast = Date.now();
+  const r = await fetch('https://nominatim.openstreetmap.org' + path, {
+    headers: {'Accept-Language':'en-US,en','User-Agent':'ZipCodeMapTool/1.0'}
+  });
+  return r.json();
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const $  = id => document.getElementById(id);
-const tip = $('floatTip');
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r,ms));
+function esc(s){ return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") }
+function setStat(id,h){ $(id).innerHTML = h }
+function setProg(id,p){ $(id).style.width = p+'%' }
 
-function setStatus(id, html){ $(id).innerHTML = html }
-function setProg(id, p){ $(id).style.width = p + '%' }
-
-function parseZips(text){
-  const s = new Set();
-  for(const l of text.split('\n')){const m=l.match(/\b(\d{5})\b/);if(m)s.add(m[1])}
-  return [...s]
+function parseZips(txt){
+  const s=new Set();
+  for(const l of txt.split('\n')){const m=l.match(/\b(\d{5})\b/);if(m)s.add(m[1])}
+  return[...s]
 }
-function parseExcLines(text){
-  return text.split('\n').map(l=>l.trim()).filter(Boolean)
+
+async function getServerStatus(){
+  if(serverStatus) return serverStatus;
+  try{ serverStatus = await(await fetch('/api/status')).json(); }
+  catch{ serverStatus = {has_zcta:false,has_states:false,has_counties:false}; }
+  return serverStatus;
 }
 
 // ── Floating tooltip ──────────────────────────────────────────────────────────
-let tipTimeout = null;
+const ft = $('ft');
+let ftActive = false;
 
-function showTip(e, headHTML, subHTML, actions){
-  $('tipHead').innerHTML    = headHTML;
-  $('tipSub').innerHTML     = subHTML || '';
-  $('tipActions').innerHTML = actions;
-  tip.classList.add('active');
-  moveTip(e);
+function showTip(e, head, sub, actions){
+  $('fh').innerHTML = head;
+  $('fs').innerHTML = sub || '';
+  $('fa').innerHTML = actions;
+  ft.classList.add('on');
+  ftActive = true;
+  posTip(e);
 }
-
-function moveTip(e){
+function posTip(e){
   const x = e.originalEvent ? e.originalEvent.clientX : e.clientX;
   const y = e.originalEvent ? e.originalEvent.clientY : e.clientY;
-  const w = tip.offsetWidth || 180;
-  const h = tip.offsetHeight || 120;
-  tip.style.left = (x + 14 + w > window.innerWidth ? x - w - 8 : x + 14) + 'px';
-  tip.style.top  = (y + 14 + h > window.innerHeight ? y - h - 8 : y + 14) + 'px';
+  const w = ft.offsetWidth||200, h = ft.offsetHeight||130;
+  ft.style.left = (x+16+w>window.innerWidth ? x-w-8 : x+16)+'px';
+  ft.style.top  = (y+16+h>window.innerHeight ? y-h-8 : y+16)+'px';
 }
-
-function hideTip(){
-  tip.classList.remove('active');
-  currentHoverLayer = null;
-}
-
+function hideTip(){ ft.classList.remove('on'); ftActive=false; }
+ft.addEventListener('mouseleave', hideTip);
 map.on('click', hideTip);
 
-// Keep tooltip open when mouse is over it
-tip.addEventListener('mouseleave', hideTip);
-
-let currentHoverLayer = null;
-let currentZip = null;
-let currentExcKey = null;
-
-// ── Style helpers ─────────────────────────────────────────────────────────────
-const S_INC      = {color:'#1a73e8',fillColor:'#1a73e8',fillOpacity:.2,weight:1.5};
-const S_INC_HOV  = {color:'#1558b0',fillColor:'#1a73e8',fillOpacity:.5,weight:2.5};
-const S_EXC      = {color:'#d93025',fillColor:'#c62828',fillOpacity:.28,weight:1.5};
-const S_EXC_HOV  = {color:'#b71c1c',fillColor:'#c62828',fillOpacity:.55,weight:2.5};
+// ── Styles ────────────────────────────────────────────────────────────────────
+const SI  = {color:'#1a73e8',fillColor:'#1a73e8',fillOpacity:.2,weight:1.5};
+const SIH = {color:'#1558b0',fillColor:'#1a73e8',fillOpacity:.5,weight:2.5};
+const SE  = {color:'#d93025',fillColor:'#c62828',fillOpacity:.28,weight:1.5};
+const SEH = {color:'#b71c1c',fillColor:'#c62828',fillOpacity:.55,weight:2.5};
 
 // ── Build included layer ──────────────────────────────────────────────────────
-function buildIncLayer(geojson){
-  return L.geoJSON(geojson, {
-    style: S_INC,
-    onEachFeature(feature, layer){
-      const zip  = feature.properties.ZCTA5CE20;
-      layer.bindTooltip(`ZIP ${zip}`, {sticky:true, offset:[10,0]});
-      layer.on('mouseover', function(e){
-        this.setStyle(S_INC_HOV); this.bringToFront();
-        currentHoverLayer = this; currentZip = zip;
-        showTip(e,
-          `ZIP ${zip}`,
-          '<span id="tipLocLoading">Определяю округ…</span>',
-          buildIncActions(zip, null, null)
+function buildIncLayer(fc){
+  return L.geoJSON(fc,{
+    style:SI,
+    onEachFeature(feat,lyr){
+      const zip = feat.properties.ZCTA5CE20 || feat.properties.zip;
+      lyr.bindTooltip(`ZIP ${zip}`,{sticky:true,offset:[10,0]});
+      lyr.on('mouseover', async function(e){
+        this.setStyle(SIH); this.bringToFront();
+        showTip(e, `ZIP ${zip}`, '<i>определяю округ…</i>', buildIncActions(zip,null));
+        const ctx = await loadZipCtx(zip, lyr.getBounds());
+        if(ftActive) showTip(e, `ZIP ${zip}`,
+          ctx ? formatLoc(ctx) : '',
+          buildIncActions(zip, ctx)
         );
-        loadZipContext(zip);
       });
-      layer.on('mousemove', moveTip);
-      layer.on('mouseout', function(){
-        this.setStyle(S_INC);
-        if(currentHoverLayer === this) hideTip();
-      });
+      lyr.on('mousemove', e=>{ if(ftActive) posTip(e); });
+      lyr.on('mouseout',  function(){ this.setStyle(SI); hideTip(); });
     }
   });
 }
 
-async function loadZipContext(zip){
-  try{
-    const r  = await fetch(`/api/zip-context?zip=${zip}`);
-    const ctx = await r.json();
-    if(ctx.error) return;
-    let loc = '';
-    if(ctx.county_name) loc += ctx.county_name;
-    if(ctx.state_abbr)  loc += (loc ? ', ' : '') + ctx.state_abbr;
-    const sub = $('tipLocLoading');
-    if(sub) sub.textContent = loc || '';
-    $('tipActions').innerHTML = buildIncActions(zip, ctx, loc);
-  }catch(e){}
+function buildIncActions(zip, ctx){
+  const a = [`<button class="tb tb-r" onclick="excludeAsZip('${zip}')">🚫 Исключить ZIP ${zip}</button>`];
+  if(ctx?.county_name)
+    a.push(`<button class="tb tb-r" onclick="excludeAsCounty('${esc(ctx.county_fips||'')}','${esc(ctx.county_name)}','${esc(ctx.state_abbr||'')}','${esc(ctx.state_name||'')}')">🚫 Исключить County: ${ctx.county_name}</button>`);
+  if(ctx?.state_name)
+    a.push(`<button class="tb tb-r" onclick="excludeAsState('${esc(ctx.state_fips||'')}','${esc(ctx.state_name)}','${esc(ctx.state_abbr||'')}')">🚫 Исключить State: ${ctx.state_name}</button>`);
+  a.push(`<button class="tb tb-g" onclick="hideTip()">✕ Закрыть</button>`);
+  return a.join('');
 }
 
-function buildIncActions(zip, ctx, loc){
-  const excZip   = `<button class="tip-btn tip-btn-exc" onclick="excludeAsZip('${zip}')">🚫 Исключить как ZIP ${zip}</button>`;
-  const excCo    = ctx && ctx.county_fips
-    ? `<button class="tip-btn tip-btn-exc" onclick="excludeAsCounty('${ctx.county_fips}','${escq(ctx.county_name)}','${ctx.state_abbr}')">🚫 Исключить как County</button>`
-    : '';
-  const excSt    = ctx && ctx.state_fips
-    ? `<button class="tip-btn tip-btn-exc" onclick="excludeAsState('${ctx.state_fips}','${escq(ctx.state_name)}')">🚫 Исключить как State</button>`
-    : '';
-  const close    = `<button class="tip-btn tip-btn-close" onclick="hideTip()">✕ Закрыть</button>`;
-  return excZip + excCo + excSt + close;
+function formatLoc(ctx){
+  const parts=[];
+  if(ctx.county_name) parts.push(ctx.county_name);
+  if(ctx.state_abbr)  parts.push(ctx.state_abbr);
+  return parts.join(', ');
 }
 
-function escq(s){ return (s||'').replace(/'/g,"\\'") }
+// ── ZIP context lookup ────────────────────────────────────────────────────────
+async function loadZipCtx(zip, bounds){
+  if(zipCtxCache.has(zip)) return zipCtxCache.get(zip);
+  const st = await getServerStatus();
+
+  let ctx = null;
+  if(st.has_counties){
+    try{
+      const r = await fetch(`/api/zip-context?zip=${zip}`);
+      ctx = await r.json();
+    }catch{}
+  }
+
+  // Fallback: Nominatim reverse geocode
+  if(!ctx?.county_name){
+    try{
+      const c = bounds.getCenter();
+      const rev = await nominatim(`/reverse?lat=${c.lat}&lon=${c.lng}&format=json&addressdetails=1&zoom=10`);
+      const a = rev.address||{};
+      const sc = (a['ISO3166-2-lvl4']||'').replace(/^US-/,'');
+      ctx = {
+        county_name: a.county||a.city_district||'',
+        state_name:  a.state||'',
+        state_abbr:  sc||a.state_code||'',
+        county_fips: null, state_fips: null,
+        _nominatim_county: a.county||a.city_district||'',
+        _nominatim_state:  a.state||'',
+        _state_abbr:       sc
+      };
+    }catch{}
+  }
+
+  if(ctx) zipCtxCache.set(zip, ctx);
+  return ctx;
+}
 
 // ── Build excluded layer ──────────────────────────────────────────────────────
-function buildExcLayer(geojson, excKey){
-  const layer = L.geoJSON(geojson, {
-    style: S_EXC,
-    onEachFeature(feature, lyr){
-      const name = feature.properties.display_name || excKey;
-      lyr.bindTooltip(name, {sticky:true, offset:[10,0], className:'exc-tip'});
+function buildExcLayer(fc, key){
+  return L.geoJSON(fc,{
+    style:SE,
+    onEachFeature(feat,lyr){
+      const name = feat.properties.display_name||key;
+      lyr.bindTooltip(name,{sticky:true,offset:[10,0],className:'rt'});
       lyr.on('mouseover', function(e){
-        this.setStyle(S_EXC_HOV); this.bringToFront();
-        currentExcKey = excKey;
+        this.setStyle(SEH); this.bringToFront();
         showTip(e,
-          `<span style="color:#d93025">${name}</span>`,
+          `<span style="color:#c62828">${name}</span>`,
           'Исключённая зона',
-          `<button class="tip-btn tip-btn-rem" onclick="removeExclusion('${escq(excKey)}')">✅ Убрать из исключений</button>
-           <button class="tip-btn tip-btn-close" onclick="hideTip()">✕ Закрыть</button>`
+          `<button class="tb tb-b" onclick="removeExclusion('${esc(key)}')">✅ Убрать из исключений</button>
+           <button class="tb tb-g" onclick="hideTip()">✕ Закрыть</button>`
         );
       });
-      lyr.on('mousemove', moveTip);
-      lyr.on('mouseout', function(){
-        this.setStyle(S_EXC);
-        if(currentExcKey === excKey) hideTip();
-      });
+      lyr.on('mousemove', e=>{ if(ftActive) posTip(e); });
+      lyr.on('mouseout',  function(){ this.setStyle(SE); hideTip(); });
     }
   });
-  return layer;
 }
 
-// ── Exclude helpers ───────────────────────────────────────────────────────────
+// ── Exclude actions ───────────────────────────────────────────────────────────
 async function excludeAsZip(zip){
   hideTip();
-  const key = `zip:${zip}`;
+  const key=`zip:${zip}`;
   if(exclusions.has(key)) return;
-  const fc = await apiFetch(`/api/zcta?zips=${zip}`);
-  if(!fc || !fc.features.length) return;
-  // Tag feature for display name
-  fc.features.forEach(f => f.properties.display_name = `ZIP ${zip}`);
-  addExclusion(key, `ZIP ${zip}`, fc);
-  addToExcTextarea(`${zip}`);
+  try{
+    const fc = await(await fetch(`/api/zcta?zips=${zip}`)).json();
+    fc.features.forEach(f=>f.properties.display_name=`ZIP ${zip}`);
+    addExclusion(key, `ZIP ${zip}`, fc);
+    appendExcTA(zip);
+  }catch(e){ console.error(e); }
 }
 
-async function excludeAsCounty(fips, name, stateAbbr){
+async function excludeAsCounty(fips, name, stAbbr, stName){
   hideTip();
-  const key = `county:${fips}`;
+  const label = `${name}${stAbbr?', '+stAbbr:''}`;
+  const key = `county:${fips||label}`;
   if(exclusions.has(key)) return;
-  const label = `${name}, ${stateAbbr}`;
-  const r = await fetch(`/api/search?q=${encodeURIComponent(name + ' County, ' + stateAbbr)}`);
-  const fc = await r.json();
-  if(!fc.features.length) return;
-  fc.features.forEach(f => f.properties.display_name = label);
-  addExclusion(key, label, fc);
-  addToExcTextarea(`${name} County, ${stateAbbr}`);
+
+  const st = await getServerStatus();
+  let fc = null;
+
+  if(fips && st.has_counties){
+    try{ fc = await(await fetch(`/api/search?q=${encodeURIComponent(name+(stAbbr?', '+stAbbr:''))}`)).json(); }catch{}
+  }
+  if(!fc?.features?.length){
+    // Nominatim fallback
+    const q = name + (stAbbr ? ` county ${stAbbr}` : ' county') + ' USA';
+    const r = await nominatim(`/search?q=${encodeURIComponent(q)}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`);
+    fc = r;
+  }
+  if(fc?.features?.length){
+    fc.features.forEach(f=>f.properties.display_name=label);
+    addExclusion(key, label, fc);
+    appendExcTA(label);
+  }
 }
 
-async function excludeAsState(fips, name){
+async function excludeAsState(fips, name, abbr){
   hideTip();
-  const key = `state:${fips}`;
+  const key = `state:${fips||name}`;
   if(exclusions.has(key)) return;
-  const r = await fetch(`/api/search?q=${encodeURIComponent(name)}`);
-  const fc = await r.json();
-  if(!fc.features.length) return;
-  fc.features.forEach(f => f.properties.display_name = name);
-  addExclusion(key, name, fc);
-  addToExcTextarea(name);
+  const display = name||(abbr?'State '+abbr:'');
+
+  const st = await getServerStatus();
+  let fc = null;
+
+  if(st.has_states){
+    try{ fc = await(await fetch(`/api/search?q=${encodeURIComponent(abbr||name)}`)).json(); }catch{}
+  }
+  if(!fc?.features?.length){
+    const q = (name||abbr) + ' state USA';
+    const r = await nominatim(`/search?q=${encodeURIComponent(q)}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`);
+    fc = r;
+  }
+  if(fc?.features?.length){
+    fc.features.forEach(f=>f.properties.display_name=display);
+    addExclusion(key, display, fc);
+    appendExcTA(abbr||name);
+  }
 }
 
-function addExclusion(key, displayName, fc){
+function addExclusion(key, name, fc){
   if(exclusions.has(key)) return;
-  const lyr = buildExcLayer(fc, key);
-  lyr.addTo(excLayer);
-  exclusions.set(key, {displayName, lyr});
-  updateExcStatus();
+  const lyr = buildExcLayer(fc, key).addTo(excLayer);
+  exclusions.set(key, {name, lyr});
+  updateExcStat();
 }
 
 function removeExclusion(key){
   hideTip();
-  const entry = exclusions.get(key);
-  if(!entry) return;
-  excLayer.removeLayer(entry.lyr);
+  const e = exclusions.get(key);
+  if(!e) return;
+  excLayer.removeLayer(e.lyr);
   exclusions.delete(key);
-  updateExcStatus();
   // Remove from textarea
-  const ta = $('excInput');
-  const lines = ta.value.split('\n').filter(l => l.trim() !== entry.displayName && l.trim() !== '');
+  const ta=$('excInput');
+  const lines = ta.value.split('\n').filter(l=>l.trim()!==e.name&&l.trim()!=='');
   ta.value = lines.join('\n');
+  updateExcStat();
 }
 
-function addToExcTextarea(line){
-  const ta = $('excInput');
-  const existing = ta.value.trim();
-  if(!existing){
-    ta.value = line;
-  } else if(!existing.split('\n').some(l => l.trim() === line.trim())){
-    ta.value = existing + '\n' + line;
-  }
+function appendExcTA(line){
+  const ta=$('excInput'), v=ta.value.trim();
+  const lines = v?v.split('\n'):[];
+  if(!lines.some(l=>l.trim()===line.trim())) ta.value=(v?v+'\n':'')+line;
 }
 
-function updateExcStatus(){
-  const n = exclusions.size;
-  setStatus('excStatus', n ? `<b>${n}</b> зон исключено` : 'Готов');
+function updateExcStat(){
+  const n=exclusions.size;
+  setStat('eStat', n?`<b>${n}</b> зон исключено`:'Готов');
 }
 
 // ── Load included ─────────────────────────────────────────────────────────────
 async function loadIncluded(){
   const zips = parseZips($('incInput').value);
-  if(!zips.length){ setStatus('incStatus','Нет ZIP-кодов'); return; }
-  clearIncluded();
-  setProg('incProg', 2);
+  if(!zips.length){ setStat('iStat','Нет ZIP-кодов'); return; }
+  clearIncluded(); setProg('iProg',2);
 
-  const BATCH = 400;
-  let loaded = 0, notFound = [];
-  const batches = [];
+  const BATCH=400;
+  const batches=[];
   for(let i=0;i<zips.length;i+=BATCH) batches.push(zips.slice(i,i+BATCH));
 
+  let loaded=0, notFound=[];
   for(let i=0;i<batches.length;i++){
-    setStatus('incStatus', `Батч ${i+1}/${batches.length}…`);
-    setProg('incProg', Math.round(5 + i/batches.length*90));
+    setStat('iStat',`Батч ${i+1}/${batches.length}…`);
+    setProg('iProg', Math.round(5 + i/batches.length*90));
     try{
-      const fc = await apiFetch(`/api/zcta?zips=${batches[i].join(',')}`);
-      const found = new Set(fc.features.map(f=>f.properties.ZCTA5CE20));
+      const fc = await(await fetch(`/api/zcta?zips=${batches[i].join(',')}`)).json();
+      const found = new Set(fc.features.map(f=>f.properties.ZCTA5CE20||f.properties.zip));
       batches[i].filter(z=>!found.has(z)).forEach(z=>notFound.push(z));
       loaded += found.size;
       if(fc.features.length) buildIncLayer(fc).addTo(incLayer);
-    }catch(e){ setStatus('incStatus',`Ошибка: ${e.message}`) }
+    }catch(e){ setStat('iStat',`❌ ${e.message}`); }
   }
-
-  setProg('incProg', 100);
+  setProg('iProg',100);
   if(incLayer.getLayers().length) map.fitBounds(incLayer.getBounds(),{padding:[30,30]});
-
-  const parts = [`✅ <b>${loaded}</b>/${zips.length} ZIP загружено`];
-  if(notFound.length) parts.push(`⚠️ не найдено: <b>${notFound.length}</b>`);
-  setStatus('incStatus', parts.join(' · '));
+  const p=[`✅ <b>${loaded}</b>/${zips.length} загружено`];
+  if(notFound.length) p.push(`⚠️ не найдено: <b>${notFound.length}</b>`);
+  setStat('iStat', p.join(' · '));
 }
 
 // ── Load excluded ─────────────────────────────────────────────────────────────
 async function loadExcluded(){
-  const lines = parseExcLines($('excInput').value);
-  if(!lines.length){ setStatus('excStatus','Нет данных'); return; }
+  const lines = $('excInput').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lines.length){ setStat('eStat','Нет данных'); return; }
+  setProg('eProg',2);
 
-  let done=0, errors=0;
-  setProg('excProg', 2);
-
+  let done=0, err=0;
   for(const line of lines){
-    setStatus('excStatus', `Ищу: ${line}…`);
+    setStat('eStat',`Ищу: ${line}…`);
     try{
-      const r  = await fetch(`/api/search?q=${encodeURIComponent(line)}`);
-      const fc = await r.json();
-      if(fc.features && fc.features.length){
-        const key  = `search:${line}`;
-        const name = fc.features[0].properties.display_name || line;
-        if(!exclusions.has(key)){
-          fc.features.forEach(f => { f.properties.display_name = name; });
-          addExclusion(key, name, fc);
-        }
-        done++;
-      } else {
-        errors++;
-        console.warn('Not found:', line);
-      }
-    }catch(e){ errors++; }
-    setProg('excProg', Math.round(5 + (done+errors)/lines.length*90));
-  }
+      // Try local API first, then Nominatim
+      const isZip = /^\d{5}$/.test(line);
+      const key = `search:${line}`;
+      if(exclusions.has(key)){ done++; continue; }
 
-  setProg('excProg', 100);
-  const parts = [`✅ <b>${done}</b> загружено`];
-  if(errors) parts.push(`⚠️ не найдено: <b>${errors}</b>`);
-  setStatus('excStatus', parts.join(' · '));
+      let fc = null;
+      if(isZip){
+        fc = await(await fetch(`/api/zcta?zips=${line}`)).json();
+        fc.features.forEach(f=>f.properties.display_name=`ZIP ${line}`);
+      } else {
+        const local = await(await fetch(`/api/search?q=${encodeURIComponent(line)}`)).json();
+        if(local.features?.length){
+          fc = local;
+        } else {
+          // Nominatim fallback
+          const r = await nominatim(`/search?q=${encodeURIComponent(line+' USA')}&format=geojson&polygon_geojson=1&limit=1&countrycodes=us`);
+          if(r.features?.length){
+            const name = r.features[0].properties.display_name?.split(',')[0]||line;
+            r.features.forEach(f=>f.properties.display_name=name);
+            fc = r;
+          }
+        }
+      }
+
+      if(fc?.features?.length){
+        const name = fc.features[0].properties.display_name||line;
+        addExclusion(key, name, fc);
+        done++;
+      } else { err++; }
+    }catch(e){ err++; console.error(line,e); }
+    setProg('eProg', Math.round(5 + (done+err)/lines.length*90));
+  }
+  setProg('eProg',100);
+  const p=[`✅ <b>${done}</b> загружено`];
+  if(err) p.push(`⚠️ не найдено: <b>${err}</b>`);
+  setStat('eStat', p.join(' · '));
 }
 
 // ── Clear ─────────────────────────────────────────────────────────────────────
-function clearIncluded(){
-  incLayer.clearLayers();
-  setProg('incProg',0);
-  setStatus('incStatus','Очищено');
-}
-
-function clearExcluded(){
-  excLayer.clearLayers();
-  exclusions.clear();
-  setProg('excProg',0);
-  setStatus('excStatus','Очищено');
-}
-
-// ── API helper ────────────────────────────────────────────────────────────────
-async function apiFetch(url){
-  const r = await fetch(url);
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
-}
+function clearIncluded(){ incLayer.clearLayers(); setProg('iProg',0); setStat('iStat','Очищено'); }
+function clearExcluded(){ excLayer.clearLayers(); exclusions.clear(); setProg('eProg',0); setStat('eStat','Очищено'); }
 </script>
 </body>
 </html>
