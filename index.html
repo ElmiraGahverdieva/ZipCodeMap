@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ZIP Code Map Viewer</title>
+  <title>ZIP Code Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -13,130 +13,135 @@
       display: flex;
       height: 100vh;
       overflow: hidden;
-      background: #1a1a2e;
-      color: #e0e0e0;
+      background: #f0f2f5;
     }
 
     /* ── Sidebar ─────────────────────────────────────────── */
     #sidebar {
-      width: 340px;
-      min-width: 280px;
-      padding: 20px 16px;
-      background: #16213e;
+      width: 320px;
+      min-width: 260px;
+      padding: 18px 14px;
+      background: #ffffff;
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 12px;
       overflow-y: auto;
-      border-right: 1px solid #0f3460;
-      box-shadow: 4px 0 12px rgba(0,0,0,.4);
+      border-right: 1px solid #dde1e7;
+      box-shadow: 2px 0 8px rgba(0,0,0,.08);
       z-index: 1000;
     }
 
     #sidebar h1 {
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 700;
-      color: #4fc3f7;
-      letter-spacing: .5px;
+      color: #1a73e8;
     }
 
     #sidebar p.hint {
       font-size: 12px;
-      color: #90a4ae;
-      line-height: 1.5;
+      color: #5f6368;
+      line-height: 1.55;
+    }
+    #sidebar p.hint code {
+      background: #f1f3f4;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 11px;
     }
 
     textarea {
       width: 100%;
-      height: 220px;
-      padding: 10px;
+      height: 200px;
+      padding: 9px 10px;
       font-size: 12.5px;
-      font-family: "Courier New", monospace;
-      border: 1px solid #0f3460;
+      font-family: "SF Mono", "Courier New", monospace;
+      border: 1px solid #dadce0;
       border-radius: 6px;
-      background: #0d1b2a;
-      color: #cfd8dc;
+      background: #fafafa;
+      color: #202124;
       resize: vertical;
       outline: none;
-      transition: border-color .2s;
+      transition: border-color .15s;
+      line-height: 1.5;
     }
-    textarea:focus { border-color: #4fc3f7; }
+    textarea:focus { border-color: #1a73e8; background: #fff; }
 
     .btn-row { display: flex; gap: 8px; }
 
     button {
       flex: 1;
-      padding: 10px 6px;
+      padding: 9px 6px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      transition: opacity .15s, transform .1s;
+      transition: box-shadow .15s, opacity .15s;
     }
+    button:hover  { opacity: .88; }
     button:active { transform: scale(.97); }
-    button:hover { opacity: .88; }
 
-    #btnLoad   { background: #1565c0; color: #fff; }
-    #btnClear  { background: #b71c1c; color: #fff; }
+    #btnLoad  { background: #1a73e8; color: #fff; }
+    #btnClear { background: #fff; color: #d93025; border: 1px solid #dadce0; }
 
-    /* ── Status / Stats ──────────────────────────────────── */
-    #statusBox {
-      font-size: 12px;
-      min-height: 18px;
-      color: #80cbc4;
-    }
-
-    #statsBox {
-      font-size: 12px;
-      color: #90a4ae;
-      line-height: 1.6;
-    }
-
+    /* ── Progress ────────────────────────────────────────── */
     .progress-wrap {
-      background: #0d1b2a;
+      background: #e8eaed;
       border-radius: 4px;
-      height: 6px;
+      height: 4px;
       overflow: hidden;
     }
     .progress-bar {
       height: 100%;
-      background: #4fc3f7;
+      background: #1a73e8;
       width: 0%;
-      transition: width .3s;
+      transition: width .3s ease;
     }
+
+    /* ── Status / Stats ──────────────────────────────────── */
+    #statusBox {
+      font-size: 12px;
+      color: #5f6368;
+      min-height: 16px;
+    }
+    #statsBox {
+      font-size: 12px;
+      color: #3c4043;
+      line-height: 1.7;
+    }
+    #statsBox b { color: #1a73e8; }
 
     /* ── Legend ──────────────────────────────────────────── */
     .legend {
       font-size: 11px;
-      color: #78909c;
-      line-height: 1.6;
-      border-top: 1px solid #0f3460;
+      color: #80868b;
+      line-height: 1.65;
+      border-top: 1px solid #e8eaed;
       padding-top: 10px;
+      margin-top: auto;
     }
-    .legend span.dot {
+    .legend .swatch {
       display: inline-block;
-      width: 12px; height: 12px;
+      width: 14px; height: 10px;
       border-radius: 2px;
-      margin-right: 4px;
+      margin-right: 5px;
       vertical-align: middle;
     }
 
     /* ── Map ─────────────────────────────────────────────── */
-    #map {
-      flex: 1;
-      z-index: 1;
-    }
+    #map { flex: 1; }
 
-    /* Leaflet tooltip style */
+    /* Tooltip */
     .leaflet-tooltip {
-      background: #1a237e;
-      border: 1px solid #3f51b5;
-      color: #e8eaf6;
+      background: #1a73e8;
+      border: none;
+      color: #fff;
       font-weight: 700;
       font-size: 13px;
-      padding: 4px 8px;
+      padding: 4px 9px;
       border-radius: 4px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.5);
+      box-shadow: 0 2px 6px rgba(0,0,0,.25);
+      pointer-events: none;
     }
     .leaflet-tooltip::before { display: none; }
   </style>
@@ -153,7 +158,8 @@
     <code>16112</code>
   </p>
 
-  <textarea id="zipInput" placeholder="16112, Pennsylvania, United States&#10;16116, Pennsylvania, United States&#10;&#10;или просто:&#10;16112&#10;16116&#10;90210"></textarea>
+  <textarea id="zipInput"
+    placeholder="16112, Pennsylvania, United States&#10;16116, Pennsylvania, United States&#10;&#10;или просто:&#10;16112&#10;16116&#10;90210"></textarea>
 
   <div class="btn-row">
     <button id="btnLoad"  onclick="loadZipCodes()">▶ Показать на карте</button>
@@ -165,10 +171,15 @@
   <div id="statsBox"></div>
 
   <div class="legend">
-    <div><span class="dot" style="background:rgba(79,195,247,.35);border:1.5px solid #4fc3f7"></span>ZIP-зона (ZCTA)</div>
-    <div style="margin-top:4px"><span class="dot" style="background:rgba(79,195,247,.65);border:2px solid #81d4fa"></span>При наведении</div>
-    <br>
-    Источник границ: US Census Bureau TIGERweb
+    <div>
+      <span class="swatch" style="background:rgba(26,115,232,.25);border:1.5px solid #1a73e8;"></span>
+      ZIP-зона (ZCTA)
+    </div>
+    <div style="margin-top:3px">
+      <span class="swatch" style="background:rgba(26,115,232,.55);border:2px solid #1558b0;"></span>
+      При наведении
+    </div>
+    <div style="margin-top:8px">Источник: US Census Bureau TIGERweb</div>
   </div>
 </div>
 
@@ -176,137 +187,117 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ── Map init ─────────────────────────────────────────────────────────────────
-const map = L.map('map', { zoomControl: true }).setView([39.5, -98.35], 5);
+// ── Map ───────────────────────────────────────────────────────────────────────
+const map = L.map('map').setView([39.5, -98.35], 5);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: '© OpenStreetMap © CARTO',
+// Light tile — CartoDB Positron (clean, similar to Google Maps style)
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
   subdomains: 'abcd',
   maxZoom: 19
 }).addTo(map);
 
 const zipLayer = L.featureGroup().addTo(map);
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
-function setStatus(msg) { document.getElementById('statusBox').textContent = msg; }
-function setProgress(pct) { document.getElementById('progressBar').style.width = pct + '%'; }
-function setStats(html)  { document.getElementById('statsBox').innerHTML = html; }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
 
-// ── Parse input ───────────────────────────────────────────────────────────────
+function setStatus(msg)  { $('statusBox').textContent = msg; }
+function setStats(html)  { $('statsBox').innerHTML = html; }
+function setProgress(p)  { $('progressBar').style.width = p + '%'; }
+
 function parseZipCodes(text) {
   const zips = new Set();
-  for (const line of text.split(/\n/)) {
-    // grab first 5-digit number found on the line
+  for (const line of text.split('\n')) {
     const m = line.match(/\b(\d{5})\b/);
     if (m) zips.add(m[1]);
   }
   return [...zips];
 }
 
-// ── TIGERweb query ────────────────────────────────────────────────────────────
-const TIGER_URL =
-  'https://tigerweb.geo.census.gov/arcgis/rest/services/' +
-  'TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer/2/query';
-
-async function queryBatch(zipBatch) {
-  const where = `ZCTA5CE20 IN (${zipBatch.map(z => `'${z}'`).join(',')})`;
-  const params = new URLSearchParams({
-    where,
-    outFields: 'ZCTA5CE20',
-    outSR: '4326',
-    f: 'geojson'
-  });
-  const resp = await fetch(`${TIGER_URL}?${params}`);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+// ── API (proxied through local server) ────────────────────────────────────────
+async function queryBatch(batch) {
+  const url = `/api/zcta?zips=${batch.join(',')}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${resp.status}`);
+  }
   return resp.json();
 }
 
-// ── GeoJSON layer builder ─────────────────────────────────────────────────────
-function buildGeoJsonLayer(geojson) {
+// ── Layer style ───────────────────────────────────────────────────────────────
+const STYLE_DEFAULT = { color: '#1a73e8', fillColor: '#1a73e8', fillOpacity: 0.22, weight: 1.5 };
+const STYLE_HOVER   = { color: '#1558b0', fillColor: '#1a73e8', fillOpacity: 0.52, weight: 2.5 };
+
+function buildLayer(geojson) {
   return L.geoJSON(geojson, {
-    style: {
-      color:       '#4fc3f7',
-      fillColor:   '#4fc3f7',
-      fillOpacity: 0.25,
-      weight:      1.5
-    },
+    style: STYLE_DEFAULT,
     onEachFeature(feature, layer) {
       const zip = feature.properties.ZCTA5CE20;
-      layer.bindTooltip(zip, { sticky: true, offset: [10, 0] });
-
-      layer.on('mouseover', function () {
-        this.setStyle({ fillOpacity: 0.55, weight: 2.5, color: '#81d4fa' });
-      });
-      layer.on('mouseout', function () {
-        this.setStyle({ fillOpacity: 0.25, weight: 1.5, color: '#4fc3f7' });
-      });
+      layer.bindTooltip(zip, { sticky: true, offset: [12, 0] });
+      layer.on('mouseover', function () { this.setStyle(STYLE_HOVER); this.bringToFront(); });
+      layer.on('mouseout',  function () { this.setStyle(STYLE_DEFAULT); });
     }
   });
 }
 
-// ── Main load ─────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function loadZipCodes() {
-  const input = document.getElementById('zipInput').value.trim();
-  const zips  = parseZipCodes(input);
-
-  if (zips.length === 0) {
-    setStatus('Не найдено ни одного 5-значного ZIP-кода. Проверьте формат.');
+  const zips = parseZipCodes($('zipInput').value);
+  if (!zips.length) {
+    setStatus('Не найдено ни одного 5-значного ZIP-кода.');
     return;
   }
 
   clearMap();
-  setProgress(0);
+  setProgress(2);
+  setStatus(`Найдено ${zips.length} ZIP-кодов, загружаю…`);
 
-  const BATCH = 500;                          // Census API limit ~1000, 500 — safe
+  const BATCH = 400;
   const batches = [];
   for (let i = 0; i < zips.length; i += BATCH) batches.push(zips.slice(i, i + BATCH));
 
-  let loaded   = 0;
-  let notFound = [];
-  let errors   = 0;
+  let loaded = 0, errors = 0;
+  const notFound = [];
 
   for (let i = 0; i < batches.length; i++) {
-    setStatus(`Загрузка батча ${i + 1} из ${batches.length}…`);
-    setProgress(Math.round(((i) / batches.length) * 100));
+    setStatus(`Батч ${i + 1} / ${batches.length}…`);
+    setProgress(Math.round(5 + (i / batches.length) * 90));
 
     try {
-      const geojson   = await queryBatch(batches[i]);
-      const foundSet  = new Set(geojson.features.map(f => f.properties.ZCTA5CE20));
-      const missing   = batches[i].filter(z => !foundSet.has(z));
+      const geojson  = await queryBatch(batches[i]);
+      const foundSet = new Set(geojson.features.map(f => f.properties.ZCTA5CE20));
 
-      notFound.push(...missing);
+      batches[i].filter(z => !foundSet.has(z)).forEach(z => notFound.push(z));
       loaded += foundSet.size;
 
-      if (geojson.features.length > 0) {
-        buildGeoJsonLayer(geojson).addTo(zipLayer);
-      }
+      if (geojson.features.length) buildLayer(geojson).addTo(zipLayer);
+
     } catch (err) {
-      console.error('Batch error:', err);
       errors += batches[i].length;
+      console.error('Batch error:', err.message);
     }
   }
 
   setProgress(100);
 
-  // Fit map to all loaded polygons
-  if (zipLayer.getLayers().length > 0) {
+  if (zipLayer.getLayers().length) {
     map.fitBounds(zipLayer.getBounds(), { padding: [30, 30] });
   }
 
-  // Summary
   const lines = [
-    `✅ Загружено: <b>${loaded}</b> из <b>${zips.length}</b> ZIP-кодов`,
-    notFound.length > 0
-      ? `⚠️ Не найдено: <b>${notFound.length}</b>${notFound.length <= 30 ? ' — ' + notFound.join(', ') : ''}`
+    `✅ Загружено: <b>${loaded}</b> из <b>${zips.length}</b>`,
+    notFound.length
+      ? `⚠️ Не найдено: <b>${notFound.length}</b>${notFound.length <= 25 ? ' — ' + notFound.join(', ') : ''}`
       : '',
-    errors > 0 ? `❌ Ошибки запроса: ${errors}` : ''
+    errors ? `❌ Ошибки сети: ${errors}` : '',
   ].filter(Boolean);
 
   setStatus('Готово.');
   setStats(lines.join('<br>'));
 }
 
-// ── Clear ─────────────────────────────────────────────────────────────────────
 function clearMap() {
   zipLayer.clearLayers();
   setProgress(0);
