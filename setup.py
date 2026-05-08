@@ -14,11 +14,27 @@ import zipfile
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zcta.db")
 
-# US Census Bureau cartographic boundary file (2020 ZCTA, 1:500k simplified)
+# Census Bureau GeoJSON cartographic boundary files (ZCTA, 1:500k simplified).
+# Multiple years tried in order — same geometries, different file vintages.
 SOURCES = [
     "https://www2.census.gov/geo/tiger/GENZ2020/geojson/cb_2020_us_zcta520_500k.zip",
+    "https://www2.census.gov/geo/tiger/GENZ2021/geojson/cb_2021_us_zcta520_500k.zip",
     "https://www2.census.gov/geo/tiger/GENZ2022/geojson/cb_2022_us_zcta520_500k.zip",
+    "https://www2.census.gov/geo/tiger/GENZ2019/geojson/cb_2019_us_zcta510_500k.zip",
+    "https://www2.census.gov/geo/tiger/GENZ2018/geojson/cb_2018_us_zcta510_500k.zip",
 ]
+
+# Send a real browser User-Agent — government sites reject Python's default
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/octet-stream,application/zip,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.census.gov/",
+}
 
 
 def progress_hook(count, block_size, total_size):
@@ -31,11 +47,38 @@ def progress_hook(count, block_size, total_size):
 def download(url):
     print(f"  Загрузка: {url}")
     try:
-        path, _ = urllib.request.urlretrieve(url, reporthook=progress_hook)
-        print()  # newline after progress bar
-        return path
+        req = urllib.request.Request(url, headers=HEADERS)
+        tmp = os.path.join(os.path.dirname(DB_PATH), "_zcta_download.zip")
+        total = [0]
+
+        def hook(count, block_size, total_size):
+            total[0] = total_size
+            progress_hook(count, block_size, total_size)
+
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            total_size = int(resp.headers.get("Content-Length", 0))
+            chunk_size = 65536
+            downloaded = 0
+            with open(tmp, "wb") as f:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size:
+                        pct = min(int(downloaded * 100 / total_size), 100)
+                        bar = "#" * (pct // 2) + "-" * (50 - pct // 2)
+                        print(f"\r  [{bar}] {pct}%  ({downloaded//1024//1024} MB)", end="", flush=True)
+
+        print()
+        return tmp
     except Exception as e:
         print(f"\n  Ошибка: {e}")
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
         return None
 
 
@@ -85,7 +128,14 @@ def build_db(features):
 
 
 def main():
-    if os.path.exists(DB_PATH):
+    # Support: python3 setup.py --file path/to/cb_xxxx.zip
+    manual_file = None
+    if "--file" in sys.argv:
+        idx = sys.argv.index("--file")
+        if idx + 1 < len(sys.argv):
+            manual_file = sys.argv[idx + 1]
+
+    if os.path.exists(DB_PATH) and not manual_file:
         conn = sqlite3.connect(DB_PATH)
         n = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]
         conn.close()
@@ -96,15 +146,32 @@ def main():
     print("=== Загрузка данных ZIP-зон (US Census Bureau) ===\n")
 
     tmp_path = None
-    raw_bytes = None
 
-    for url in SOURCES:
-        tmp_path = download(url)
-        if tmp_path:
-            break
+    if manual_file:
+        if not os.path.exists(manual_file):
+            print(f"❌ Файл не найден: {manual_file}")
+            return False
+        print(f"  Использую локальный файл: {manual_file}")
+        tmp_path = manual_file
+    else:
+        for url in SOURCES:
+            tmp_path = download(url)
+            if tmp_path:
+                break
 
     if not tmp_path:
-        print("\n❌ Не удалось скачать данные. Проверьте интернет-соединение.")
+        print("\n❌ Не удалось скачать данные автоматически.")
+        print()
+        print("── Ручная установка ─────────────────────────────────────")
+        print("1. Откройте в браузере:")
+        print("   https://www2.census.gov/geo/tiger/GENZ2020/geojson/")
+        print("   Скачайте файл: cb_2020_us_zcta520_500k.zip")
+        print()
+        print("2. Поместите скачанный .zip в папку zipcodemap/")
+        print()
+        print("3. Запустите:")
+        print("   python3 setup.py --file cb_2020_us_zcta520_500k.zip")
+        print("─────────────────────────────────────────────────────────")
         return False
 
     try:
@@ -114,10 +181,12 @@ def main():
         print(f"❌ Ошибка архива: {e}")
         return False
     finally:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+        # Don't delete a file the user provided manually
+        if not manual_file:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
     print("  Парсю GeoJSON...")
     geojson = json.loads(raw_bytes)
