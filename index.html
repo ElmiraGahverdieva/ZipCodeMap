@@ -619,19 +619,51 @@ async function fetchStateBoundary(name) {
 }
 
 // Fetch US county boundary: local DB → TIGERweb → Nominatim
+// Used by hover-to-exclude tooltip (single county)
 async function fetchCountyBoundary(name, state) {
   const q = name + ' county' + (state ? ` ${state}` : '');
   const local = await searchLocal(q);
   if (local) return local;
   const tl = await getTigerLayers();
   if (tl.countyUrl) {
-    const safe  = name.replace(/'/g, "''");
-    let where   = `NAME='${safe}'`;
+    const safe = name.replace(/'/g, "''");
+    let where  = `NAME='${safe}'`;
     if (state) where += ` AND STUSAB='${state.toUpperCase()}'`;
     const fc = await tigerQuery(tl.countyUrl, where, 'NAME,STUSAB,NAMELSAD');
     if (fc) return fc;
   }
   return nomSearch(q + ' USA', { countrycodes:'us' });
+}
+
+// Batch county fetch for loadExcluded — one TIGERweb request for all counties
+async function fetchAllCounties(countyItems) {
+  const tl = await getTigerLayers();
+  if (!tl.countyUrl) return new Map();
+
+  // Build OR conditions
+  const conds = countyItems.map(item => {
+    const safe = item.name.replace(/'/g, "''");
+    return item.state
+      ? `(NAME='${safe}' AND STUSAB='${item.state.toUpperCase()}')`
+      : `NAME='${safe}'`;
+  });
+
+  // TIGERweb has a URL limit — chunk into batches of 80
+  const result = new Map();
+  for (let i = 0; i < conds.length; i += 80) {
+    const where = conds.slice(i, i + 80).join(' OR ');
+    const fc = await tigerQuery(tl.countyUrl, where, 'NAME,STUSAB,NAMELSAD', 500);
+    if (!fc) continue;
+    for (const feat of fc.features) {
+      const n = (feat.properties.NAME || '').toLowerCase();
+      const s = (feat.properties.STUSAB || '').toLowerCase();
+      if (n) {
+        result.set(`${n}:${s}`, feat);
+        if (!result.has(`${n}:`)) result.set(`${n}:`, feat);
+      }
+    }
+  }
+  return result;
 }
 
 async function searchLocal(q) {
@@ -745,36 +777,82 @@ async function loadExcluded() {
     tick('Округа Конгресса');
   }
 
-  // ── 4. States (2-letter abbr only) — local DB → TIGERweb → Nominatim ──
+  // ── 4. States (2-letter abbr only) — batch local DB → TIGERweb ──
   if (byType.state.length) {
-    tick('Штаты');
-    for (const item of byType.state) {
-      if (exclusions.has(item.key)) { done++; tick('Штаты'); continue; }
-      try {
-        const fc = await fetchStateBoundary(item.name);
-        if (hasPolygon(fc)) {
+    const newStates = byType.state.filter(i => !exclusions.has(i.key));
+    done += byType.state.length - newStates.length;
+    if (newStates.length) {
+      tick('Штаты');
+      const localMap = await searchLocalBatch(newStates.map(i => i.name));
+      for (const item of newStates) {
+        const fc = localMap.get(item.name);
+        if (fc) {
           fc.features.forEach(f => f.properties.display_name = item.display);
           addExclusion(item.key, item.display, fc);
           done++;
-        } else err++;
-      } catch { err++; }
+        } else {
+          // TIGERweb fallback for abbreviations
+          try {
+            const fc2 = await fetchStateBoundary(item.name);
+            if (hasPolygon(fc2)) {
+              fc2.features.forEach(f => f.properties.display_name = item.display);
+              addExclusion(item.key, item.display, fc2);
+              done++;
+            } else err++;
+          } catch { err++; }
+        }
+      }
       tick('Штаты');
     }
   }
 
-  // ── 5. Counties — local DB → TIGERweb → Nominatim ──
+  // ── 5. Counties — batch local DB → batch TIGERweb → Nominatim for misses ──
   if (byType.county.length) {
-    tick('Округа');
-    for (const item of byType.county) {
-      if (exclusions.has(item.key)) { done++; tick('Округа'); continue; }
-      try {
-        const fc = await fetchCountyBoundary(item.name, item.state);
-        if (hasPolygon(fc)) {
+    const newCounties = byType.county.filter(i => !exclusions.has(i.key));
+    done += byType.county.length - newCounties.length;
+
+    if (newCounties.length) {
+      tick('Округа');
+
+      // Batch local DB lookup
+      const localMap = await searchLocalBatch(newCounties.map(i => i.query));
+      const needTiger = [];
+      for (const item of newCounties) {
+        const fc = localMap.get(item.query);
+        if (fc) {
           fc.features.forEach(f => f.properties.display_name = item.display);
           addExclusion(item.key, item.display, fc);
           done++;
-        } else err++;
-      } catch { err++; }
+        } else needTiger.push(item);
+      }
+
+      // Batch TIGERweb for remaining
+      if (needTiger.length) {
+        const tigerMap = await fetchAllCounties(needTiger);
+        const needNominatim = [];
+        for (const item of needTiger) {
+          const feat = tigerMap.get(`${item.name.toLowerCase()}:${item.state.toLowerCase()}`)
+                    || tigerMap.get(`${item.name.toLowerCase()}:`);
+          if (feat) {
+            feat.properties.display_name = item.display;
+            addExclusion(item.key, item.display, { type:'FeatureCollection', features:[feat] });
+            done++;
+          } else needNominatim.push(item);
+        }
+
+        // Nominatim only for counties not found anywhere
+        for (const item of needNominatim) {
+          tick(`Nominatim: ${item.display}`);
+          try {
+            const fc = await nomSearch(`${item.name} county ${item.state} USA`, { countrycodes:'us' });
+            if (hasPolygon(fc)) {
+              fc.features.forEach(f => f.properties.display_name = item.display);
+              addExclusion(item.key, item.display, fc);
+              done++;
+            } else err++;
+          } catch { err++; }
+        }
+      }
       tick('Округа');
     }
   }
