@@ -236,19 +236,58 @@ async function getTigerLayers() {
     }
   }
 
-  tigerLayers = { stateUrl: null, countyUrl: null };
+  tigerLayers = { stateUrl: null, countyUrl: null, cdUrl: null };
   return tigerLayers;
 }
 
-async function tigerQuery(url, where, outFields) {
+async function tigerQuery(url, where, outFields, maxCount = 50) {
   if (!url) return null;
   try {
-    const params = new URLSearchParams({ where, outFields, outSR:'4326', f:'geojson' });
+    const params = new URLSearchParams({
+      where, outFields, outSR:'4326', f:'geojson',
+      resultRecordCount: String(maxCount),
+    });
     const r = await fetch(`${url}?${params}`);
     if (!r.ok) return null;
     const fc = await r.json();
     return hasPolygon(fc) ? fc : null;
   } catch { return null; }
+}
+
+// Fetch ALL congressional districts for a set of states in ONE or FEW queries
+async function fetchAllCDs(cdItems) {
+  const tl = await getTigerLayers();
+  if (!tl.cdUrl) return new Map();
+
+  // Build FIPS lookup
+  const fipsMap = new Map(); // fips → stateName
+  for (const item of cdItems) {
+    const fips = US_STATE_FIPS[item.state];
+    if (fips) fipsMap.set(fips, item.state);
+  }
+  if (!fipsMap.size) return new Map();
+
+  const fipsList = [...fipsMap.keys()].map(f => `'${f}'`).join(',');
+  const where = `STATEFP IN (${fipsList})`;
+
+  // Try each possible CD field name — stop at first that returns data
+  for (const field of ['CD119FP', 'CD118FP', 'CD116FP', 'CDFP']) {
+    const fc = await tigerQuery(tl.cdUrl, where, `STATEFP,${field}`, 500);
+    if (!fc) continue;
+
+    const result = new Map(); // "state:nn" → GeoJSON feature
+    for (const feat of fc.features) {
+      const fp = feat.properties.STATEFP;
+      const cd = feat.properties[field];
+      if (!fp || cd == null) continue;
+      const state = fipsMap.get(fp);
+      if (!state) continue;
+      const key = `${state}:${String(parseInt(cd)).padStart(2, '0')}`;
+      result.set(key, feat);
+    }
+    if (result.size > 0) return result;
+  }
+  return new Map();
 }
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -579,24 +618,6 @@ async function fetchStateBoundary(name) {
   return nomSearch(name + ' state', { countrycodes:'us' });
 }
 
-// Fetch US congressional district boundary via TIGERweb
-async function fetchCDBoundary(stateName, cdNum) {
-  const fips = US_STATE_FIPS[stateName.toLowerCase()];
-  if (!fips) return null;
-  const tl = await getTigerLayers();
-  if (!tl.cdUrl) return null;
-  // Try different field names used across Census vintages
-  for (const field of ['CD119FP','CD118FP','CD116FP','CDFP']) {
-    const fc = await tigerQuery(
-      tl.cdUrl,
-      `STATEFP='${fips}' AND ${field}='${cdNum}'`,
-      `STATEFP,${field},NAMELSAD`
-    );
-    if (fc) return fc;
-  }
-  return null;
-}
-
 // Fetch US county boundary: local DB → TIGERweb → Nominatim
 async function fetchCountyBoundary(name, state) {
   const q = name + ' county' + (state ? ` ${state}` : '');
@@ -676,27 +697,21 @@ async function loadExcluded() {
     }
   }
 
-  // ── 2. Congressional districts — TIGERweb ──
+  // ── 2. Congressional districts — one batch TIGERweb query per state group ──
   if (byType.cd.length) {
     tick('Округа Конгресса');
-    const tl = await getTigerLayers();
-    if (!tl.cdUrl) {
-      // TIGERweb discovery failed — mark all as error
-      err += byType.cd.length;
-    } else {
-      for (const item of byType.cd) {
-        if (exclusions.has(item.key)) { done++; tick('Округа Конгресса'); continue; }
-        try {
-          const fc = await fetchCDBoundary(item.state, item.num);
-          if (fc && hasPolygon(fc)) {
-            fc.features.forEach(f => f.properties.display_name = item.display);
-            addExclusion(item.key, item.display, fc);
-            done++;
-          } else err++;
-        } catch { err++; }
-        tick('Округа Конгресса');
-      }
+    const newCDs = byType.cd.filter(i => !exclusions.has(i.key));
+    const cdMap = await fetchAllCDs(newCDs);  // 1–4 total network requests
+    for (const item of byType.cd) {
+      if (exclusions.has(item.key)) { done++; continue; }
+      const feat = cdMap.get(`${item.state}:${item.num}`);
+      if (feat) {
+        feat.properties.display_name = item.display;
+        addExclusion(item.key, item.display, { type:'FeatureCollection', features:[feat] });
+        done++;
+      } else err++;
     }
+    tick('Округа Конгресса');
   }
 
   // ── 4. States (2-letter abbr only) — local DB → TIGERweb → Nominatim ──
