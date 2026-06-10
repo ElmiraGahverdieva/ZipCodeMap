@@ -152,6 +152,27 @@ const US_STATE_ABBRS = new Set([
   'VA','WA','WV','WI','WY','DC'
 ]);
 
+// State full name → 2-letter abbreviation
+const US_STATE_NAME_TO_ABBR = {
+  'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA',
+  'colorado':'CO','connecticut':'CT','delaware':'DE','florida':'FL','georgia':'GA',
+  'hawaii':'HI','idaho':'ID','illinois':'IL','indiana':'IN','iowa':'IA',
+  'kansas':'KS','kentucky':'KY','louisiana':'LA','maine':'ME','maryland':'MD',
+  'massachusetts':'MA','michigan':'MI','minnesota':'MN','mississippi':'MS',
+  'missouri':'MO','montana':'MT','nebraska':'NE','nevada':'NV',
+  'new hampshire':'NH','new jersey':'NJ','new mexico':'NM','new york':'NY',
+  'north carolina':'NC','north dakota':'ND','ohio':'OH','oklahoma':'OK',
+  'oregon':'OR','pennsylvania':'PA','rhode island':'RI','south carolina':'SC',
+  'south dakota':'SD','tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT',
+  'virginia':'VA','washington':'WA','west virginia':'WV','wisconsin':'WI',
+  'wyoming':'WY','district of columbia':'DC'
+};
+function toStateAbbr(s) {
+  if (!s) return '';
+  if (s.length === 2) return s.toUpperCase();
+  return US_STATE_NAME_TO_ABBR[s.toLowerCase()] || s.toUpperCase();
+}
+
 // State name → FIPS (for TIGERweb congressional district queries)
 const US_STATE_FIPS = {
   'alabama':'01','alaska':'02','arizona':'04','arkansas':'05','california':'06',
@@ -644,11 +665,12 @@ async function fetchAllCounties(countyItems) {
   const tl = await getTigerLayers();
   if (!tl.countyUrl) return new Map();
 
-  // Build OR conditions
+  // Build OR conditions — convert full state names to 2-letter abbreviations
   const conds = countyItems.map(item => {
-    const safe = item.name.replace(/'/g, "''");
-    return item.state
-      ? `(NAME='${safe}' AND STUSAB='${item.state.toUpperCase()}')`
+    const safe  = item.name.replace(/'/g, "''");
+    const abbr  = toStateAbbr(item.state);
+    return abbr
+      ? `(NAME='${safe}' AND STUSAB='${abbr}')`
       : `NAME='${safe}'`;
   });
 
