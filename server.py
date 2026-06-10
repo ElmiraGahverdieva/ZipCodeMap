@@ -224,6 +224,11 @@ class Handler(BaseHTTPRequestHandler):
             if not q:
                 return self._err(400, "No query")
             self._ok(search_region(q))
+        elif parsed.path == "/api/search-batch":
+            # Accepts multiple q= params, returns {query: FeatureCollection, ...}
+            queries = [q.strip() for q in params.get("q", []) if q.strip()]
+            result = {q: search_region(q) for q in queries[:300]}
+            self._ok(result)
         elif parsed.path == "/api/zip-context":
             z = params.get("zip", [""])[0].strip().zfill(5)
             ctx = get_zip_context(z)

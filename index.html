@@ -642,10 +642,41 @@ async function searchLocal(q) {
   } catch { return null; }
 }
 
+// Batch search — one HTTP request for many queries, returns Map<query, FC|null>
+async function searchLocalBatch(queries) {
+  if (!queries.length) return new Map();
+  try {
+    // Split into chunks of 100 to keep URL length reasonable
+    const chunks = [];
+    for (let i = 0; i < queries.length; i += 100)
+      chunks.push(queries.slice(i, i + 100));
+
+    const maps = await Promise.all(chunks.map(async chunk => {
+      const params = new URLSearchParams();
+      chunk.forEach(q => params.append('q', q));
+      const r = await fetch(`/api/search-batch?${params}`);
+      return r.json();
+    }));
+
+    const result = new Map();
+    for (const obj of maps)
+      for (const [q, fc] of Object.entries(obj))
+        result.set(q, hasPolygon(fc) ? fc : null);
+    return result;
+  } catch { return new Map(); }
+}
+
 // ── Load excluded ─────────────────────────────────────────────────────────────
 async function loadExcluded() {
   const rawLines = $('excInput').value.split('\n').map(l => l.trim()).filter(Boolean);
   if (!rawLines.length) { setStat('eStat','Нет данных'); return; }
+
+  // Check if Natural Earth data is loaded
+  const st = await getServerStatus();
+  if (!st.has_countries || !st.has_admin1) {
+    setStat('eStat', '⚠️ Запустите python3 setup.py — нужны справочники стран!');
+    await sleep(3000);
+  }
 
   // Classify all lines first — show summary before starting
   const items = rawLines.map(classifyExcLine).filter(Boolean);
@@ -749,28 +780,46 @@ async function loadExcluded() {
   }
 
   // ── 6. Places: countries, provinces, states by full name, cities ──
-  // Most resolve instantly from local DB (countries/admin1 tables).
-  // Only unrecognized cities fall through to Nominatim.
   if (byType.place.length) {
-    tick('Места');
-    for (const item of byType.place) {
-      if (exclusions.has(item.key)) { done++; tick('Места'); continue; }
-      try {
-        // Try local DB first — instant for countries and world provinces/states
-        let fc = await searchLocal(item.query);
-        if (!fc) {
-          // Nominatim fallback for cities/specific places not in DB
-          fc = await nomSearch(item.query, { countrycodes:'us' });
-          if (!fc) fc = await nomSearch(item.query);  // no country filter = international
-        }
-        if (hasPolygon(fc)) {
-          const label = fc.features[0].properties.display_name || item.display;
+    const newPlaces = byType.place.filter(i => !exclusions.has(i.key));
+    // Count already-done exclusions
+    done += byType.place.length - newPlaces.length;
+
+    if (newPlaces.length) {
+      setStat('eStat', `Поиск в базе… (${done}/${total})`);
+
+      // ONE batch request to local DB — parallel, no rate limit
+      const dbMap = await searchLocalBatch(newPlaces.map(i => i.query));
+
+      const needNominatim = [];
+      for (const item of newPlaces) {
+        const fc = dbMap.get(item.query);
+        if (fc) {
+          const label = fc.features[0]?.properties?.display_name || item.display;
           fc.features.forEach(f => f.properties.display_name = label);
           addExclusion(item.key, label, fc);
           done++;
-        } else err++;
-      } catch { err++; }
-      tick('Места');
+        } else {
+          needNominatim.push(item);
+        }
+      }
+      tick('База данных');
+
+      // Only unresolved items (cities etc) go to Nominatim
+      for (const item of needNominatim) {
+        tick(`Nominatim: ${item.display}`);
+        try {
+          let fc = await nomSearch(item.query, { countrycodes:'us' });
+          if (!fc) fc = await nomSearch(item.query);
+          if (hasPolygon(fc)) {
+            const label = fc.features[0]?.properties?.display_name || item.display;
+            fc.features.forEach(f => f.properties.display_name = label);
+            addExclusion(item.key, label, fc);
+            done++;
+          } else err++;
+        } catch { err++; }
+        tick('Места');
+      }
     }
   }
 
