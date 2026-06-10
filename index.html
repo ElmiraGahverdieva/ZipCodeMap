@@ -200,58 +200,62 @@ async function nominatim(path) {
 }
 
 // ── TIGERweb layer discovery ──────────────────────────────────────────────────
-// Discover state/county layer IDs once from TIGERweb MapServer metadata
 const TIGER_BASE = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb';
-let tigerLayers = null;  // { stateUrl, countyUrl }
+let tigerLayers = null;
 
 async function getTigerLayers() {
   if (tigerLayers) return tigerLayers;
 
-  // Services to try, in order
-  const services = ['tigerWMS_Census2020', 'tigerWMS_ACS2022', 'tigerWMS_Current'];
+  // State_County is the dedicated service — try it first; it always has both
+  // Other services are fallbacks for congressional districts
+  const services = ['State_County', 'tigerWMS_Current', 'tigerWMS_ACS2022', 'tigerWMS_Census2020'];
+
+  let stateUrl = null, countyUrl = null, cdUrl = null;
 
   for (const svc of services) {
+    if (stateUrl && countyUrl && cdUrl) break;  // have everything, stop
     try {
       const r = await fetch(`${TIGER_BASE}/${svc}/MapServer?f=json`);
       if (!r.ok) continue;
-      const info = await r.json();
-      const layers = info.layers || [];
+      const { layers = [] } = await r.json();
+      const base = `${TIGER_BASE}/${svc}/MapServer`;
 
-      const stLyr  = layers.find(l => /^state/i.test(l.name) && !/sub|equiv/i.test(l.name));
-      const coLyr  = layers.find(l => /^county/i.test(l.name) && !/sub|equiv/i.test(l.name));
-      const cdLyr  = layers.find(l => /congressional\s+dist/i.test(l.name));
-
-      if (stLyr || coLyr || cdLyr) {
-        const base = `${TIGER_BASE}/${svc}/MapServer`;
-        tigerLayers = {
-          stateUrl:  stLyr  ? `${base}/${stLyr.id}/query`  : null,
-          countyUrl: coLyr  ? `${base}/${coLyr.id}/query`  : null,
-          cdUrl:     cdLyr  ? `${base}/${cdLyr.id}/query`  : null,
-        };
-        console.log('TIGERweb layers:', tigerLayers, `(${svc})`);
-        return tigerLayers;
+      // Scan ALL layers in this service, picking the first match for each type
+      for (const lyr of layers) {
+        const n = lyr.name || '';
+        if (!stateUrl  && /\bstate/i.test(n)  && !/subdivis/i.test(n))   stateUrl  = `${base}/${lyr.id}/query`;
+        if (!countyUrl && /\bcounty\b|\bcounties\b/i.test(n))             countyUrl = `${base}/${lyr.id}/query`;
+        if (!cdUrl     && /congressional/i.test(n))                       cdUrl     = `${base}/${lyr.id}/query`;
       }
     } catch(e) {
       console.warn('TIGERweb discovery failed for', svc, e.message);
     }
   }
 
-  tigerLayers = { stateUrl: null, countyUrl: null, cdUrl: null };
+  // Hard-coded fallbacks (stable Census endpoints) in case discovery fails
+  if (!countyUrl) countyUrl = `${TIGER_BASE}/State_County/MapServer/1/query`;
+  if (!stateUrl)  stateUrl  = `${TIGER_BASE}/State_County/MapServer/0/query`;
+
+  tigerLayers = { stateUrl, countyUrl, cdUrl };
+  console.log('TIGERweb layers:', tigerLayers);
   return tigerLayers;
 }
 
 async function tigerQuery(url, where, outFields, maxCount = 50) {
   if (!url) return null;
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 10000);  // 10s timeout
   try {
     const params = new URLSearchParams({
       where, outFields, outSR:'4326', f:'geojson',
       resultRecordCount: String(maxCount),
     });
-    const r = await fetch(`${url}?${params}`);
+    const r = await fetch(`${url}?${params}`, { signal: ctrl.signal });
+    clearTimeout(tid);
     if (!r.ok) return null;
     const fc = await r.json();
     return hasPolygon(fc) ? fc : null;
-  } catch { return null; }
+  } catch { clearTimeout(tid); return null; }
 }
 
 // Fetch ALL congressional districts for a set of states in ONE or FEW queries
