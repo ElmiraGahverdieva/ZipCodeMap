@@ -152,6 +152,22 @@ const US_STATE_ABBRS = new Set([
   'VA','WA','WV','WI','WY','DC'
 ]);
 
+// State name → FIPS (for TIGERweb congressional district queries)
+const US_STATE_FIPS = {
+  'alabama':'01','alaska':'02','arizona':'04','arkansas':'05','california':'06',
+  'colorado':'08','connecticut':'09','delaware':'10','florida':'12','georgia':'13',
+  'hawaii':'15','idaho':'16','illinois':'17','indiana':'18','iowa':'19',
+  'kansas':'20','kentucky':'21','louisiana':'22','maine':'23','maryland':'24',
+  'massachusetts':'25','michigan':'26','minnesota':'27','mississippi':'28',
+  'missouri':'29','montana':'30','nebraska':'31','nevada':'32',
+  'new hampshire':'33','new jersey':'34','new mexico':'35','new york':'36',
+  'north carolina':'37','north dakota':'38','ohio':'39','oklahoma':'40',
+  'oregon':'41','pennsylvania':'42','rhode island':'44','south carolina':'45',
+  'south dakota':'46','tennessee':'47','texas':'48','utah':'49','vermont':'50',
+  'virginia':'51','washington':'53','west virginia':'54','wisconsin':'55',
+  'wyoming':'56','district of columbia':'11'
+};
+
 // ── Map ───────────────────────────────────────────────────────────────────────
 const map = L.map('map').setView([39.5,-98.35],5);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
@@ -203,12 +219,14 @@ async function getTigerLayers() {
 
       const stLyr  = layers.find(l => /^state/i.test(l.name) && !/sub|equiv/i.test(l.name));
       const coLyr  = layers.find(l => /^county/i.test(l.name) && !/sub|equiv/i.test(l.name));
+      const cdLyr  = layers.find(l => /congressional\s+dist/i.test(l.name));
 
-      if (stLyr || coLyr) {
+      if (stLyr || coLyr || cdLyr) {
         const base = `${TIGER_BASE}/${svc}/MapServer`;
         tigerLayers = {
           stateUrl:  stLyr  ? `${base}/${stLyr.id}/query`  : null,
           countyUrl: coLyr  ? `${base}/${coLyr.id}/query`  : null,
+          cdUrl:     cdLyr  ? `${base}/${cdLyr.id}/query`  : null,
         };
         console.log('TIGERweb layers:', tigerLayers, `(${svc})`);
         return tigerLayers;
@@ -504,6 +522,16 @@ function classifyExcLine(raw) {
              key:`state:${first.toLowerCase()}` };
   }
 
+  // ── Congressional district: "Georgia's 2nd Congressional District …" ──
+  const cdM = line.match(/^([A-Za-z][A-Za-z\s]+?)'s?\s+(\d+)(?:st|nd|rd|th)?\s+congressional\s+district/i);
+  if (cdM) {
+    const state = cdM[1].trim().toLowerCase();
+    const num   = parseInt(cdM[2], 10);
+    const padded = String(num).padStart(2, '0');
+    const display = `${cdM[1].trim()} CD-${num}`;
+    return { raw, type:'cd', state, num: padded, display, key:`cd:${state}:${padded}` };
+  }
+
   // ── County (has "county" keyword) ──
   if (/\bcounty\b/i.test(first)) {
     const countyName = first.replace(/\s*county\s*$/i, '').trim();
@@ -551,6 +579,24 @@ async function fetchStateBoundary(name) {
   return nomSearch(name + ' state', { countrycodes:'us' });
 }
 
+// Fetch US congressional district boundary via TIGERweb
+async function fetchCDBoundary(stateName, cdNum) {
+  const fips = US_STATE_FIPS[stateName.toLowerCase()];
+  if (!fips) return null;
+  const tl = await getTigerLayers();
+  if (!tl.cdUrl) return null;
+  // Try different field names used across Census vintages
+  for (const field of ['CD119FP','CD118FP','CD116FP','CDFP']) {
+    const fc = await tigerQuery(
+      tl.cdUrl,
+      `STATEFP='${fips}' AND ${field}='${cdNum}'`,
+      `STATEFP,${field},NAMELSAD`
+    );
+    if (fc) return fc;
+  }
+  return null;
+}
+
 // Fetch US county boundary: local DB → TIGERweb → Nominatim
 async function fetchCountyBoundary(name, state) {
   const q = name + ' county' + (state ? ` ${state}` : '');
@@ -586,6 +632,7 @@ async function loadExcluded() {
     zip:    items.filter(i => i.type === 'zip'),
     state:  items.filter(i => i.type === 'state'),
     county: items.filter(i => i.type === 'county'),
+    cd:     items.filter(i => i.type === 'cd'),
     place:  items.filter(i => i.type === 'place'),
   };
   const total = items.length;
@@ -593,6 +640,7 @@ async function loadExcluded() {
     byType.zip.length    && `${byType.zip.length} ZIP`,
     byType.state.length  && `${byType.state.length} штатов`,
     byType.county.length && `${byType.county.length} округов`,
+    byType.cd.length     && `${byType.cd.length} округов Конгресса`,
     byType.place.length  && `${byType.place.length} мест`,
   ].filter(Boolean).join(', ');
   setStat('eStat', `Найдено: ${summary}`);
@@ -628,7 +676,30 @@ async function loadExcluded() {
     }
   }
 
-  // ── 2. States (2-letter abbr only) — local DB → TIGERweb → Nominatim ──
+  // ── 2. Congressional districts — TIGERweb ──
+  if (byType.cd.length) {
+    tick('Округа Конгресса');
+    const tl = await getTigerLayers();
+    if (!tl.cdUrl) {
+      // TIGERweb discovery failed — mark all as error
+      err += byType.cd.length;
+    } else {
+      for (const item of byType.cd) {
+        if (exclusions.has(item.key)) { done++; tick('Округа Конгресса'); continue; }
+        try {
+          const fc = await fetchCDBoundary(item.state, item.num);
+          if (fc && hasPolygon(fc)) {
+            fc.features.forEach(f => f.properties.display_name = item.display);
+            addExclusion(item.key, item.display, fc);
+            done++;
+          } else err++;
+        } catch { err++; }
+        tick('Округа Конгресса');
+      }
+    }
+  }
+
+  // ── 4. States (2-letter abbr only) — local DB → TIGERweb → Nominatim ──
   if (byType.state.length) {
     tick('Штаты');
     for (const item of byType.state) {
@@ -645,7 +716,7 @@ async function loadExcluded() {
     }
   }
 
-  // ── 3. Counties — local DB → TIGERweb → Nominatim ──
+  // ── 5. Counties — local DB → TIGERweb → Nominatim ──
   if (byType.county.length) {
     tick('Округа');
     for (const item of byType.county) {
@@ -662,7 +733,7 @@ async function loadExcluded() {
     }
   }
 
-  // ── 4. Places: countries, provinces, states by full name, cities ──
+  // ── 6. Places: countries, provinces, states by full name, cities ──
   // Most resolve instantly from local DB (countries/admin1 tables).
   // Only unrecognized cities fall through to Nominatim.
   if (byType.place.length) {
