@@ -303,19 +303,23 @@ function nominatim(path) {
 
 // ── TIGERweb layer discovery ──────────────────────────────────────────────────
 const TIGER_BASE = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb';
+// USDOT/NTAD re-publishes Census congressional district boundaries on a separate
+// ArcGIS org — kept as an extra fallback source, tried after TIGERweb.
+const NTAD_CD_URL = 'https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_Congressional_Districts/FeatureServer/0/query';
 let tigerLayers = null;
 
 async function getTigerLayers() {
   if (tigerLayers) return tigerLayers;
 
   // State_County is the dedicated service — try it first; it always has both
-  // Other services are fallbacks for congressional districts
-  const services = ['State_County', 'tigerWMS_Current', 'tigerWMS_ACS2022', 'tigerWMS_Census2020'];
+  // Other services are fallbacks for congressional districts (different Congress vintages
+  // live on different services, so we keep ALL congressional matches, not just the first)
+  const services = ['State_County', 'tigerWMS_Current', 'tigerWMS_ACS2023', 'tigerWMS_ACS2022', 'tigerWMS_Census2020'];
 
-  let stateUrl = null, countyUrl = null, cdUrl = null;
+  let stateUrl = null, countyUrl = null;
+  const cdUrls = [];
 
   for (const svc of services) {
-    if (stateUrl && countyUrl && cdUrl) break;  // have everything, stop
     try {
       const r = await fetch(`${TIGER_BASE}/${svc}/MapServer?f=json`);
       if (!r.ok) continue;
@@ -327,7 +331,7 @@ async function getTigerLayers() {
         const n = lyr.name || '';
         if (!stateUrl  && /\bstate/i.test(n)  && !/subdivis/i.test(n))   stateUrl  = `${base}/${lyr.id}/query`;
         if (!countyUrl && /\bcounty\b|\bcounties\b/i.test(n))             countyUrl = `${base}/${lyr.id}/query`;
-        if (!cdUrl     && /congressional/i.test(n))                       cdUrl     = `${base}/${lyr.id}/query`;
+        if (/congressional/i.test(n))                                    cdUrls.push(`${base}/${lyr.id}/query`);
       }
     } catch(e) {
       console.warn('TIGERweb discovery failed for', svc, e.message);
@@ -338,9 +342,34 @@ async function getTigerLayers() {
   if (!countyUrl) countyUrl = `${TIGER_BASE}/State_County/MapServer/1/query`;
   if (!stateUrl)  stateUrl  = `${TIGER_BASE}/State_County/MapServer/0/query`;
 
-  tigerLayers = { stateUrl, countyUrl, cdUrl };
+  // NTAD tried last — only useful if TIGERweb's vintages miss a requested district
+  cdUrls.push(NTAD_CD_URL);
+
+  tigerLayers = { stateUrl, countyUrl, cdUrls: [...new Set(cdUrls)] };
   console.log('TIGERweb layers:', tigerLayers);
   return tigerLayers;
+}
+
+// Reads a layer's actual field names so we don't have to guess field naming —
+// different services name the state/district fields differently
+// (STATEFP/CD119FP on TIGERweb vs. e.g. STATE_FIPS/DISTRICT on other ArcGIS orgs).
+async function getLayerMeta(queryUrl) {
+  try {
+    const metaUrl = queryUrl.replace(/\/query$/, '');
+    const r = await fetch(`${metaUrl}?f=json`);
+    if (!r.ok) return null;
+    const meta = await r.json();
+    const names = (meta.fields || []).map(f => f.name);
+    const stateField = names.find(n => /^statefp$/i.test(n))
+                     || names.find(n => /state.*fips|fips.*state/i.test(n))
+                     || names.find(n => /^state$/i.test(n));
+    let cdFields = names.filter(n => /^CD\d*FP$/i.test(n));
+    if (!cdFields.length) {
+      const alt = names.find(n => /district/i.test(n) && !/name|label/i.test(n));
+      if (alt) cdFields = [alt];
+    }
+    return { stateField, cdFields, allFields: names };
+  } catch { return null; }
 }
 
 async function tigerQuery(url, where, outFields, maxCount = 50) {
@@ -363,7 +392,13 @@ async function tigerQuery(url, where, outFields, maxCount = 50) {
 // Reverse FIPS map: "13" → "georgia"
 const _FIPS_TO_STATE = Object.fromEntries(Object.entries(US_STATE_FIPS).map(([s,f])=>[f,s]));
 
-// Fetch congressional districts — local DB first, TIGERweb as fallback
+// Fetch congressional districts — local DB first, TIGERweb/NTAD as fallback.
+// Different fallback sources (TIGERweb vintages, NTAD) use different field
+// names for state and district number, so each candidate layer is
+// introspected for its own field names instead of assuming Census naming
+// everywhere. Results are merged across sources — a requested item may only
+// exist in one of them (e.g. a now-superseded 2022 map vs. the current 119th
+// Congress map).
 async function fetchAllCDs(cdItems) {
   const result  = new Map();
   const needTiger = [];
@@ -415,33 +450,50 @@ async function fetchAllCDs(cdItems) {
 
 async function _fetchAllCDsTiger(cdItems) {
   const tl = await getTigerLayers();
-  if (!tl.cdUrl) return new Map();
+  if (!tl.cdUrls || !tl.cdUrls.length) return new Map();
 
-  const fipsMap = new Map();
+  const fipsMap = new Map();  // fips → stateName
+  const abbrMap = new Map();  // 2-letter abbr → stateName
   for (const item of cdItems) {
     const fips = US_STATE_FIPS[item.state];
     if (fips) fipsMap.set(fips, item.state);
+    abbrMap.set(toStateAbbr(item.state), item.state);
   }
   if (!fipsMap.size) return new Map();
 
-  const fipsList = [...fipsMap.keys()].map(f => `'${f}'`).join(',');
-  const where = `STATEFP IN (${fipsList})`;
+  const wanted = new Set(cdItems.map(i => `${i.state}:${i.num}`));
+  const result = new Map(); // "state:nn" → GeoJSON feature
 
-  for (const field of ['CD119FP', 'CD118FP', 'CD116FP', 'CDFP']) {
-    const fc = await tigerQuery(tl.cdUrl, where, `STATEFP,${field}`, 500);
-    if (!fc) continue;
-    const result = new Map();
-    for (const feat of fc.features) {
-      const fp = feat.properties.STATEFP;
-      const cd = feat.properties[field];
-      if (!fp || cd == null) continue;
-      const state = fipsMap.get(fp);
-      if (!state) continue;
-      result.set(`${state}:${String(parseInt(cd)).padStart(2, '0')}`, feat);
+  for (const cdUrl of tl.cdUrls) {
+    if (cdItems.every(i => result.has(`${i.state}:${i.num}`))) break;
+
+    const meta = await getLayerMeta(cdUrl);
+    if (!meta || !meta.stateField || !meta.cdFields.length) {
+      console.warn('CD layer skipped (no usable fields):', cdUrl, meta && meta.allFields);
+      continue;
     }
-    if (result.size > 0) return result;
+
+    const fipsList = [...fipsMap.keys()].map(f => `'${f}'`).join(',');
+    const abbrList = [...abbrMap.keys()].map(a => `'${a}'`).join(',');
+    const where = `${meta.stateField} IN (${fipsList}) OR ${meta.stateField} IN (${abbrList})`;
+
+    for (const field of meta.cdFields) {
+      const fc = await tigerQuery(cdUrl, where, `${meta.stateField},${field}`, 1000);
+      if (!fc) continue;
+      for (const feat of fc.features) {
+        const raw = feat.properties[meta.stateField];
+        const cd  = feat.properties[field];
+        if (raw == null || cd == null) continue;
+        const state = fipsMap.get(String(raw)) || abbrMap.get(String(raw).toUpperCase());
+        if (!state) continue;
+        const key = `${state}:${String(parseInt(cd)).padStart(2, '0')}`;
+        if (!result.has(key)) result.set(key, feat);
+      }
+      if (result.size > 0) break;  // this layer's field worked, no need to try other field names on it
+    }
   }
-  return new Map();
+  console.log('CD lookup:', result.size, 'found of', wanted.size, 'requested; tried', tl.cdUrls.length, 'layer(s)');
+  return result;
 }
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
