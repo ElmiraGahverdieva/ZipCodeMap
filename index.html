@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>ZIP Code Map</title>
+  <title>Location Tool</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%231a73e8'/%3E%3Cpath d='M10 18 L24 12 L40 20 L54 14 L54 46 L40 52 L24 44 L10 50 Z' fill='none' stroke='white' stroke-width='3' stroke-linejoin='round'/%3E%3Cline x1='24' y1='12' x2='24' y2='44' stroke='white' stroke-width='2'/%3E%3Cline x1='40' y1='20' x2='40' y2='52' stroke='white' stroke-width='2'/%3E%3C/svg%3E"/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
@@ -27,7 +28,7 @@
       text-transform:uppercase;display:flex;align-items:center;gap:5px;flex-shrink:0
     }
     .dot{width:11px;height:11px;border-radius:2px;flex-shrink:0}
-    .dot-blue{background:#1a73e8}.dot-red{background:#d93025}
+    .dot-blue{background:#1a73e8}.dot-red{background:#d93025}.dot-gray{background:#9e9e9e}.dot-pink{background:#e91e63}
 
     textarea{
       flex:1;min-height:60px;padding:7px 8px;
@@ -37,6 +38,7 @@
     }
     #incInput:focus{border-color:#1a73e8;background:#fff}
     #excInput:focus{border-color:#d93025;background:#fff}
+    #neuInput:focus{border-color:#757575;background:#fff}
 
     .btn-row{display:flex;gap:5px;flex-shrink:0}
     button{
@@ -46,12 +48,13 @@
     button:hover{opacity:.85} button:active{transform:scale(.97)}
     .btn-inc{background:#1a73e8;color:#fff}
     .btn-exc{background:#d93025;color:#fff}
+    .btn-neu{background:#757575;color:#fff}
     .btn-clr{background:#fff;color:#5f6368;border:1px solid #dadce0}
 
     .prog-wrap{background:#e8eaed;border-radius:3px;height:3px;flex-shrink:0}
     .prog-bar{height:100%;border-radius:3px;width:0%;transition:width .3s}
-    .pb-blue{background:#1a73e8}.pb-red{background:#d93025}
-    .status{font-size:11px;color:#5f6368;min-height:14px;flex-shrink:0}
+    .pb-blue{background:#1a73e8}.pb-red{background:#d93025}.pb-gray{background:#9e9e9e}
+    .status{font-size:11px;color:#5f6368;min-height:14px;flex-shrink:0;max-height:130px;overflow-y:auto}
     .status b{color:#202124}
 
     /* ── Legend ───────────────────────────────────────────────── */
@@ -79,14 +82,37 @@
     .tb-r{background:#fff3f3;color:#c62828}.tb-r:hover{background:#fce8e6}
     .tb-b{background:#e8f0fe;color:#1558b0}.tb-b:hover{background:#d2e3fc}
     .tb-g{background:#f8f9fa;color:#5f6368}.tb-g:hover{background:#f1f3f4}
+    .tb-p{background:#fce4ec;color:#880e4f}.tb-p:hover{background:#f8bbd0}
 
     .leaflet-tooltip{
       background:#1a73e8;border:none;color:#fff;font-weight:700;
-      font-size:12px;padding:3px 8px;border-radius:4px;
-      box-shadow:0 2px 6px rgba(0,0,0,.2);pointer-events:none
+      font-size:12px;padding:4px 10px;border-radius:4px;
+      box-shadow:0 2px 6px rgba(0,0,0,.2);pointer-events:none;
+      white-space:normal;line-height:1.5;min-width:160px;max-width:260px
     }
     .leaflet-tooltip.rt{background:#c62828}
+    .leaflet-tooltip.nt{background:#616161}
+    .leaflet-tooltip.pt{background:#880e4f}
+    .leaflet-tooltip.hover-tip{background:#37474f;font-size:12px;padding:5px 10px;line-height:1.5;font-weight:400}
+    .leaflet-tooltip.hover-tip b{font-weight:700}
     .leaflet-tooltip::before{display:none}
+
+    /* ── Show All Areas control ───────────────────────────────── */
+    .show-all-ctrl{margin:10px 0 0 10px}
+    .show-all-ctrl button{
+      background:#fff;border:2px solid #dadce0;border-radius:6px;
+      padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;
+      color:#3c4043;box-shadow:0 1px 4px rgba(0,0,0,.18);white-space:nowrap;
+      transition:all .15s
+    }
+    .show-all-ctrl button:hover{background:#f8f9fa;border-color:#bdc1c6}
+    .show-all-ctrl button.active{background:#e91e63;color:#fff;border-color:#e91e63;box-shadow:0 1px 6px rgba(233,30,99,.4)}
+
+    /* ── Marked items panel ───────────────────────────────────── */
+    .marked-item{display:flex;justify-content:space-between;align-items:baseline;
+      padding:1px 0;line-height:1.65;color:#880e4f}
+    .marked-del{cursor:pointer;color:#e91e63;font-weight:700;padding:0 2px;flex-shrink:0;margin-left:4px}
+    .marked-del:hover{color:#880e4f}
   </style>
 </head>
 <body>
@@ -95,7 +121,7 @@
 
   <div class="panel">
     <div class="panel-title"><span class="dot dot-blue"></span>Included areas</div>
-    <textarea id="incInput" placeholder="ZIP-коды:&#10;16112, Pennsylvania, US&#10;16116&#10;90210"></textarea>
+    <textarea id="incInput" placeholder="ZIP, штат, округ, страна:&#10;16112, Pennsylvania&#10;Allegheny County, PA&#10;Texas&#10;France"></textarea>
     <div class="btn-row">
       <button class="btn-inc" onclick="loadIncluded()">▶ Показать</button>
       <button class="btn-clr" onclick="clearIncluded()">✕</button>
@@ -115,11 +141,45 @@
     <div class="status" id="eStat">Готов</div>
   </div>
 
+  <div class="panel">
+    <div class="panel-title"><span class="dot dot-gray"></span>Neutral areas</div>
+    <textarea id="neuInput" placeholder="ZIP, штат, округ, страна:&#10;16112, Pennsylvania&#10;Allegheny County, PA&#10;Texas&#10;France"></textarea>
+    <div class="btn-row">
+      <button class="btn-neu" onclick="loadNeutral()">▶ Показать</button>
+      <button class="btn-clr" onclick="clearNeutral()">✕</button>
+    </div>
+    <div class="prog-wrap"><div class="prog-bar pb-gray" id="nProg"></div></div>
+    <div class="status" id="nStat">Готов</div>
+  </div>
+
+  <div id="markedPanel" class="panel" style="display:none;flex-shrink:0;max-height:220px">
+    <div class="panel-title"><span class="dot dot-pink"></span>Отмечены для исключения</div>
+    <div id="markedList" style="font-size:10.5px;overflow-y:auto;flex:1;min-height:24px;padding:2px 0"></div>
+    <div class="btn-row">
+      <button class="btn-exc" onclick="applyMarkedToExcluded()" style="background:#e91e63">→ В исключения</button>
+      <button class="btn-clr" onclick="clearAllMarked()">✕</button>
+    </div>
+  </div>
+
+  <div id="removedIncPanel" class="panel" style="display:none;flex-shrink:0;max-height:160px">
+    <div class="panel-title"><span class="dot dot-blue"></span>Убраны из включённых</div>
+    <div id="removedIncList" style="font-size:10.5px;color:#1558b0;overflow-y:auto;flex:1;min-height:24px;line-height:1.7"></div>
+    <div class="btn-row"><button class="btn-clr" onclick="clearRemovedInc()">✕ Очистить</button></div>
+  </div>
+
+  <div id="removedPanel" class="panel" style="display:none;flex-shrink:0;max-height:160px">
+    <div class="panel-title"><span class="dot" style="background:#34a853"></span>Убраны из исключений</div>
+    <div id="removedList" style="font-size:10.5px;color:#1e7e34;overflow-y:auto;flex:1;min-height:24px;line-height:1.7"></div>
+    <div class="btn-row"><button class="btn-clr" onclick="clearRemoved()">✕ Очистить</button></div>
+  </div>
+
   <div id="legend">
     <div class="leg"><span class="sw" style="background:rgba(26,115,232,.22);border:1.5px solid #1a73e8"></span>Включённые ZIP</div>
     <div class="leg"><span class="sw" style="background:rgba(198,40,40,.28);border:1.5px solid #d93025"></span>Исключённые зоны</div>
-    <div class="leg"><span class="sw" style="background:rgba(198,40,40,.55);border:2px solid #b71c1c"></span>Пересечение — блокировка</div>
-    <div style="margin-top:3px;font-size:10px">Наведите на зону → меню исключения</div>
+    <div class="leg"><span class="sw" style="background:rgba(52,168,83,.6);border:2px solid #0a6b2e"></span>Пересечение включ. и исключ.</div>
+    <div class="leg"><span class="sw" style="background:rgba(158,158,158,.22);border:1.5px solid #757575"></span>Нейтральные зоны</div>
+    <div class="leg"><span class="sw" style="background:rgba(233,30,99,.28);border:1.5px solid #e91e63"></span>Отмечены для исключения</div>
+    <div style="margin-top:3px;font-size:10px">Правый клик по зоне → меню</div>
   </div>
 </div>
 
@@ -132,6 +192,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 <script>
 // ── US state lookup (for classification) ─────────────────────────────────────
 const US_STATE_NAMES = new Set([
@@ -195,29 +256,49 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
   attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
 }).addTo(map);
 
-const incLayer = L.featureGroup().addTo(map);
-const excLayer = L.featureGroup().addTo(map);
+map.createPane('hoverPane');
+map.getPane('hoverPane').style.zIndex = 310; // under all feature layers (default overlay = 400)
+const incLayer     = L.featureGroup().addTo(map);
+const excLayer     = L.featureGroup().addTo(map);
+const neuLayer     = L.featureGroup().addTo(map);
+const markedLayer  = L.featureGroup().addTo(map); // pink "marked as excluded"
+const overlapLayer = L.featureGroup().addTo(map); // green intersection, on top
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const exclusions   = new Map();   // key → {name, lyr}
 const zipCtxCache  = new Map();   // zip → context object
-let   serverStatus = null;        // /api/status result
+let   serverStatus = null;
+const removedItems    = [];
+const removedIncItems = [];
+const incLayers       = new Map(); // raw → L.geoJSON group (for direct removal)
+const neuLayers       = new Map();
+const markedItems     = new Map(); // key → {name, lyr}
+let   _hideTipTimer = null;
+let   _activeLayer  = null;
+let   _activeStyle  = null;
+let   _incGen = 0;   // incremented on clear — aborts in-flight loadIncluded
+let   _excGen = 0;   // incremented on clear — aborts in-flight loadExcluded
+let   _neuGen = 0;   // incremented on clear — aborts in-flight loadNeutral
 
-// ── Nominatim rate limiter ────────────────────────────────────────────────────
-let _nomLast = 0;
-async function nominatim(path) {
-  const wait = Math.max(0, 1200 - (Date.now() - _nomLast));
-  if (wait) await sleep(wait);
-  _nomLast = Date.now();
-  try {
-    const r = await fetch('https://nominatim.openstreetmap.org' + path,
-      { headers: { 'Accept-Language': 'en-US,en' } });
-    if (!r.ok) throw new Error(`Nominatim HTTP ${r.status}`);
-    return r.json();
-  } catch(e) {
-    console.warn('Nominatim failed:', path, e.message);
-    return { type:'FeatureCollection', features:[] };
-  }
+// ── Nominatim serial queue — guarantees 1.2s between requests, race-condition-free ──
+// All concurrent callers chain onto _nomMutex; each call runs only after the previous finishes.
+let _nomLast  = 0;
+let _nomMutex = Promise.resolve();
+function nominatim(path) {
+  return (_nomMutex = _nomMutex.then(async () => {
+    const wait = Math.max(0, 1200 - (Date.now() - _nomLast));
+    if (wait) await sleep(wait);
+    _nomLast = Date.now();
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org' + path,
+        { headers: { 'Accept-Language': 'en-US,en' } });
+      if (!r.ok) throw new Error(`Nominatim HTTP ${r.status}`);
+      return r.json();
+    } catch(e) {
+      console.warn('Nominatim failed:', path, e.message);
+      return { type:'FeatureCollection', features:[] };
+    }
+  }));
 }
 
 // ── TIGERweb layer discovery ──────────────────────────────────────────────────
@@ -279,13 +360,64 @@ async function tigerQuery(url, where, outFields, maxCount = 50) {
   } catch { clearTimeout(tid); return null; }
 }
 
-// Fetch ALL congressional districts for a set of states in ONE or FEW queries
+// Reverse FIPS map: "13" → "georgia"
+const _FIPS_TO_STATE = Object.fromEntries(Object.entries(US_STATE_FIPS).map(([s,f])=>[f,s]));
+
+// Fetch congressional districts — local DB first, TIGERweb as fallback
 async function fetchAllCDs(cdItems) {
+  const result  = new Map();
+  const needTiger = [];
+
+  // Build FIPS for each item
+  const reqItems = [];
+  for (const item of cdItems) {
+    const fips = US_STATE_FIPS[item.state];
+    if (fips) reqItems.push({ state_fips: fips, cd_fp: item.num, _key: `${item.state}:${item.num}` });
+    else needTiger.push(item);
+  }
+
+  // ── Try local DB endpoint ────────────────────────────────────────────────────
+  if (reqItems.length) {
+    try {
+      const r = await fetch('/api/cd-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reqItems.map(i => ({ state_fips: i.state_fips, cd_fp: i.cd_fp })))
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const found = new Set();
+        for (const [key, feat] of Object.entries(data)) {
+          const [sfips, cdfp] = key.split(':');
+          const state = _FIPS_TO_STATE[sfips];
+          if (state) { result.set(`${state}:${cdfp}`, feat); found.add(`${state}:${cdfp}`); }
+        }
+        for (const item of reqItems) {
+          if (!found.has(item._key)) needTiger.push({ state: item._key.split(':')[0], num: item._key.split(':')[1] });
+        }
+      } else {
+        needTiger.push(...reqItems.map(i => ({ state: _FIPS_TO_STATE[i.state_fips]||'', num: i.cd_fp })));
+      }
+    } catch(e) {
+      console.warn('CD local fetch failed:', e);
+      needTiger.push(...reqItems.map(i => ({ state: _FIPS_TO_STATE[i.state_fips]||'', num: i.cd_fp })));
+    }
+  }
+
+  // ── TIGERweb fallback for anything not found locally ────────────────────────
+  if (needTiger.length) {
+    const tigerMap = await _fetchAllCDsTiger(needTiger);
+    for (const [k,v] of tigerMap) result.set(k, v);
+  }
+
+  return result;
+}
+
+async function _fetchAllCDsTiger(cdItems) {
   const tl = await getTigerLayers();
   if (!tl.cdUrl) return new Map();
 
-  // Build FIPS lookup
-  const fipsMap = new Map(); // fips → stateName
+  const fipsMap = new Map();
   for (const item of cdItems) {
     const fips = US_STATE_FIPS[item.state];
     if (fips) fipsMap.set(fips, item.state);
@@ -295,20 +427,17 @@ async function fetchAllCDs(cdItems) {
   const fipsList = [...fipsMap.keys()].map(f => `'${f}'`).join(',');
   const where = `STATEFP IN (${fipsList})`;
 
-  // Try each possible CD field name — stop at first that returns data
   for (const field of ['CD119FP', 'CD118FP', 'CD116FP', 'CDFP']) {
     const fc = await tigerQuery(tl.cdUrl, where, `STATEFP,${field}`, 500);
     if (!fc) continue;
-
-    const result = new Map(); // "state:nn" → GeoJSON feature
+    const result = new Map();
     for (const feat of fc.features) {
       const fp = feat.properties.STATEFP;
       const cd = feat.properties[field];
       if (!fp || cd == null) continue;
       const state = fipsMap.get(fp);
       if (!state) continue;
-      const key = `${state}:${String(parseInt(cd)).padStart(2, '0')}`;
-      result.set(key, feat);
+      result.set(`${state}:${String(parseInt(cd)).padStart(2, '0')}`, feat);
     }
     if (result.size > 0) return result;
   }
@@ -353,36 +482,94 @@ function posTip(e){
   ft.style.left = (x+16+w>window.innerWidth ? x-w-8 : x+16)+'px';
   ft.style.top  = (y+16+h>window.innerHeight ? y-h-8 : y+16)+'px';
 }
-function hideTip(){ ft.classList.remove('on'); ftActive=false; }
-ft.addEventListener('mouseleave', hideTip);
-map.on('click', hideTip);
+function setActiveLayer(lyr, origStyle){
+  if (_activeLayer && _activeLayer !== lyr){
+    try { _activeLayer.setStyle(_activeStyle); } catch(_){}
+  }
+  _activeLayer = lyr; _activeStyle = origStyle;
+}
+function hideTipNow(){
+  if (_activeLayer){ try { _activeLayer.setStyle(_activeStyle); } catch(_){} _activeLayer=null; }
+  ft.classList.remove('on'); ftActive = false;
+}
+map.on('click', hideTipNow);
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const SI  = {color:'#1a73e8',fillColor:'#1a73e8',fillOpacity:.2,weight:1.5};
 const SIH = {color:'#1558b0',fillColor:'#1a73e8',fillOpacity:.5,weight:2.5};
 const SE  = {color:'#d93025',fillColor:'#c62828',fillOpacity:.28,weight:1.5};
 const SEH = {color:'#b71c1c',fillColor:'#c62828',fillOpacity:.55,weight:2.5};
+const SO  = {color:'#0a6b2e',fillColor:'#34a853',fillOpacity:.55,weight:2};  // overlap
+const SN  = {color:'#757575',fillColor:'#9e9e9e',fillOpacity:.2,weight:1.5};
+const SNH = {color:'#424242',fillColor:'#757575',fillOpacity:.5,weight:2.5};
+const SM  = {color:'#e91e63',fillColor:'#f48fb1',fillOpacity:.35,weight:1.5};
+const SMH = {color:'#ad1457',fillColor:'#f06292',fillOpacity:.55,weight:2.5};
+const SHov= {color:'#ff6d00',fillColor:'#ff6d00',fillOpacity:.08,weight:2,dashArray:'6 4'};
 
 // ── Build included layer ──────────────────────────────────────────────────────
 function buildIncLayer(fc){
-  return L.geoJSON(fc,{
+  const lyrGroup = L.geoJSON(fc,{
     style:SI,
     onEachFeature(feat,lyr){
-      const zip = feat.properties.ZCTA5CE20 || feat.properties.zip;
-      lyr.bindTooltip(`ZIP ${zip}`,{sticky:true,offset:[10,0]});
-      lyr.on('mouseover', async function(e){
-        this.setStyle(SIH); this.bringToFront();
-        showTip(e, `ZIP ${zip}`, '<i>определяю округ…</i>', buildIncActions(zip,null));
-        const ctx = await loadZipCtx(zip, lyr.getBounds());
-        if(ftActive) showTip(e, `ZIP ${zip}`,
-          ctx ? formatLoc(ctx) : '',
-          buildIncActions(zip, ctx)
-        );
+      const p   = feat.properties;
+      const zip = p.ZCTA5CE20 || p.zip;
+      const label = p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '');
+      lyr.bindTooltip(label, {sticky:true,offset:[10,0]});
+
+      lyr.on('mousemove', function(e){
+        if (!window.turf) return;
+        try {
+          const pt = turf.point([e.latlng.lng, e.latlng.lat]);
+          const seen = new Set();
+          const labels = [];
+          incLayer.eachLayer(grp => {
+            const innerLyrs = [];
+            if (grp.eachLayer) grp.eachLayer(l => innerLyrs.push(l));
+            else innerLyrs.push(grp);
+            for (const l of innerLyrs) {
+              if (!l.feature?.geometry) continue;
+              if (l.getBounds && !l.getBounds().contains(e.latlng)) continue;
+              try {
+                if (turf.booleanPointInPolygon(pt, l.feature)) {
+                  const lbl = l.feature.properties.display_name
+                    || (l.feature.properties.ZCTA5CE20 ? `ZIP ${l.feature.properties.ZCTA5CE20}` : null)
+                    || '';
+                  if (lbl && !seen.has(lbl)) { seen.add(lbl); labels.push(lbl); }
+                }
+              } catch(_) {}
+            }
+          });
+          const tip = this.getTooltip();
+          if (tip) tip.setContent(labels.length > 1 ? labels.join(' | ') : label);
+        } catch(_) {}
       });
-      lyr.on('mousemove', e=>{ if(ftActive) posTip(e); });
-      lyr.on('mouseout',  function(){ this.setStyle(SI); hideTip(); });
+
+      lyr.on('contextmenu', async function(e){
+        L.DomEvent.preventDefault(e.originalEvent||e);
+        setActiveLayer(this, this.options.style||SI);
+        this.setStyle(SIH); this.bringToFront();
+        if (zip) {
+          showTip(e, `ZIP ${zip}`, '<i>определяю округ…</i>', buildIncActions(zip,null));
+          const ctx = await loadZipCtx(zip, lyr.getBounds());
+          showTip(e, `ZIP ${zip}`, ctx?formatLoc(ctx):'', buildIncActions(zip,ctx));
+        } else {
+          const rawLine = p._raw || '';
+          const removeBtn = rawLine
+            ? `<button class="tb tb-b" onclick="removeInclusion('${esc(rawLine)}')">✅ Убрать из включённых</button>`
+            : '';
+          showTip(e,
+            `<span style="color:#1a73e8">${label}</span>`,
+            'Включённая зона',
+            `${removeBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+        }
+      });
     }
   });
+  fc.features?.forEach(f => {
+    const raw = f.properties?._raw;
+    if (raw) incLayers.set(raw, lyrGroup);
+  });
+  return lyrGroup;
 }
 
 function buildIncActions(zip, ctx){
@@ -391,7 +578,7 @@ function buildIncActions(zip, ctx){
     a.push(`<button class="tb tb-r" onclick="excludeAsCounty('${esc(ctx.county_fips||'')}','${esc(ctx.county_name)}','${esc(ctx.state_abbr||'')}','${esc(ctx.state_name||'')}')">🚫 Исключить County: ${ctx.county_name}</button>`);
   if(ctx?.state_name)
     a.push(`<button class="tb tb-r" onclick="excludeAsState('${esc(ctx.state_fips||'')}','${esc(ctx.state_name)}','${esc(ctx.state_abbr||'')}')">🚫 Исключить State: ${ctx.state_name}</button>`);
-  a.push(`<button class="tb tb-g" onclick="hideTip()">✕ Закрыть</button>`);
+  a.push(`<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
   return a.join('');
 }
 
@@ -445,24 +632,298 @@ function buildExcLayer(fc, key){
     onEachFeature(feat,lyr){
       const name = feat.properties.display_name||key;
       lyr.bindTooltip(name,{sticky:true,offset:[10,0],className:'rt'});
-      lyr.on('mouseover', function(e){
+      lyr.on('mousemove', function(e){
+        if (!window.turf) return;
+        try {
+          const pt = turf.point([e.latlng.lng, e.latlng.lat]);
+          const seen = new Set();
+          const labels = [];
+          excLayer.eachLayer(grp => {
+            const innerLyrs = [];
+            if (grp.eachLayer) grp.eachLayer(l => innerLyrs.push(l));
+            else innerLyrs.push(grp);
+            for (const l of innerLyrs) {
+              if (!l.feature?.geometry) continue;
+              if (l.getBounds && !l.getBounds().contains(e.latlng)) continue;
+              try {
+                if (turf.booleanPointInPolygon(pt, l.feature)) {
+                  const lbl = l.feature.properties.display_name || '';
+                  if (lbl && !seen.has(lbl)) { seen.add(lbl); labels.push(lbl); }
+                }
+              } catch(_) {}
+            }
+          });
+          const tip = this.getTooltip();
+          if (tip) tip.setContent(labels.length > 1 ? labels.join(' | ') : name);
+        } catch(_) {}
+      });
+      lyr.on('contextmenu', function(e){
+        L.DomEvent.preventDefault(e.originalEvent||e);
+        setActiveLayer(this, SE);
         this.setStyle(SEH); this.bringToFront();
         showTip(e,
           `<span style="color:#c62828">${name}</span>`,
           'Исключённая зона',
           `<button class="tb tb-b" onclick="removeExclusion('${esc(key)}')">✅ Убрать из исключений</button>
-           <button class="tb tb-g" onclick="hideTip()">✕ Закрыть</button>`
+           <button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`
         );
       });
-      lyr.on('mousemove', e=>{ if(ftActive) posTip(e); });
-      lyr.on('mouseout',  function(){ this.setStyle(SE); hideTip(); });
     }
   });
 }
 
+// ── Show All Areas — state & hover vars ──────────────────────────────────────
+let showAllMode   = false;
+let _hoverLyr     = null;
+let _hoverTimer   = null;
+const _areaCache  = new Map();    // "lat2:lon2" → server data
+const _pendingAreaData = new Map();
+let   _pendingAreaId   = 0;
+
+// Leaflet control button
+const _showAllCtrl = L.control({position:'topleft'});
+_showAllCtrl.onAdd = function() {
+  const d = L.DomUtil.create('div', 'show-all-ctrl');
+  d.innerHTML = '<button id="showAllBtn" onclick="toggleShowAll()">🗺 Показать все зоны</button>';
+  L.DomEvent.disableClickPropagation(d);
+  L.DomEvent.disableScrollPropagation(d);
+  return d;
+};
+_showAllCtrl.addTo(map);
+
+function toggleShowAll() {
+  showAllMode = !showAllMode;
+  if (showAllMode) map.doubleClickZoom.disable();
+  else { map.doubleClickZoom.enable(); _clearHover(); }
+  const b = $('showAllBtn');
+  b.classList.toggle('active', showAllMode);
+  b.textContent = showAllMode ? '✕ Скрыть зоны' : '🗺 Показать все зоны';
+}
+
+// Debounced hover
+map.on('mousemove', function(e) {
+  if (!showAllMode) return;
+  clearTimeout(_hoverTimer);
+  _hoverTimer = setTimeout(() => _hoverArea(e.latlng), 220);
+});
+map.on('mouseout', function() { clearTimeout(_hoverTimer); _clearHover(); });
+
+// Map-level double-click (e.propagatedFrom is set when bubbling from a feature layer)
+map.on('dblclick', function(e) {
+  if (e.propagatedFrom || !showAllMode) return;
+  const {lat, lng} = e.latlng;
+  _fetchAreaAt(lat, lng).then(data => {
+    if (!data?.county_fips) return;
+    _showAreaMenu(e, data);
+  });
+});
+
+async function _hoverArea(latlng) {
+  const data = await _fetchAreaAt(latlng.lat, latlng.lng);
+  _clearHover();
+  if (!data?.county_geom || !showAllMode) return;
+  _hoverLyr = L.geoJSON({type:'Feature', geometry:data.county_geom}, {
+    style: SHov, pane: 'hoverPane'
+  });
+  _hoverLyr.bindTooltip(
+    `<b>${data.county_name}</b><br>${data.state_name || data.state_abbr}`,
+    {sticky:true, offset:[12,0], className:'hover-tip'}
+  );
+  _hoverLyr.addTo(map);
+}
+
+function _clearHover() {
+  if (_hoverLyr) { map.removeLayer(_hoverLyr); _hoverLyr = null; }
+}
+
+async function _fetchAreaAt(lat, lon) {
+  const key = `${lat.toFixed(2)}:${lon.toFixed(2)}`;
+  if (_areaCache.has(key)) return _areaCache.get(key);
+  try {
+    const r = await fetch(`/api/area-at?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`);
+    const d = r.ok ? await r.json() : null;
+    const v = d?.county_fips ? d : null;
+    _areaCache.set(key, v);
+    return v;
+  } catch { return null; }
+}
+
+function _showAreaMenu(e, data) {
+  const id = ++_pendingAreaId;
+  _pendingAreaData.set(id, data);
+
+  const ck = `mark:county:${data.county_fips}`;
+  const sk = `mark:state:${data.state_fips}`;
+
+  const cBtn = markedItems.has(ck)
+    ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.county_name} уже отмечен</div>`
+    : `<button class="tb tb-p" onclick="markArea('county',${id})">📍 ${data.county_name}, ${data.state_abbr}</button>`;
+
+  const sBtn = data.state_name
+    ? (markedItems.has(sk)
+        ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.state_name} уже отмечен</div>`
+        : `<button class="tb tb-p" onclick="markArea('state',${id})">📍 ${data.state_name}</button>`)
+    : '';
+
+  showTip(e, '➕ Добавить в исключения', '',
+    `${cBtn}${sBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+}
+
+async function markArea(type, dataId) {
+  hideTipNow();
+  _clearHover();
+  const data = _pendingAreaData.get(dataId);
+  if (!data) return;
+
+  let key, name, geom;
+  if (type === 'county') {
+    key  = `mark:county:${data.county_fips}`;
+    name = `${data.county_name}, ${data.state_abbr}`;
+    geom = data.county_geom;
+  } else {
+    key  = `mark:state:${data.state_fips}`;
+    name = data.state_name;
+    const fc = await fetchStateBoundary(data.state_abbr || data.state_name);
+    if (!fc?.features?.length) return;
+    geom = fc.features[0].geometry;
+  }
+  if (markedItems.has(key)) return;
+
+  const fc = {type:'FeatureCollection', features:[{
+    type:'Feature', properties:{display_name:name, _key:key}, geometry:geom
+  }]};
+  const lyr = _buildMarkedLayer(fc).addTo(markedLayer);
+  markedItems.set(key, {name, lyr});
+  _updateMarkedPanel();
+  scheduleOverlap();
+}
+
+function _buildMarkedLayer(fc) {
+  return L.geoJSON(fc, {
+    style: SM,
+    onEachFeature(feat, lyr) {
+      const name = feat.properties.display_name;
+      const key  = feat.properties._key;
+      lyr.bindTooltip(name, {sticky:true, offset:[10,0], className:'pt'});
+      lyr.on('contextmenu', function(e) {
+        L.DomEvent.preventDefault(e.originalEvent||e);
+        setActiveLayer(this, SM);
+        this.setStyle(SMH); this.bringToFront();
+        showTip(e,
+          `<span style="color:#e91e63">${name}</span>`,
+          'Отмечено для исключения',
+          `<button class="tb tb-p" onclick="removeMarked('${esc(key)}')">✕ Убрать</button>
+           <button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`
+        );
+      });
+    }
+  });
+}
+
+function removeMarked(key) {
+  hideTipNow();
+  const item = markedItems.get(key);
+  if (!item) return;
+  markedLayer.removeLayer(item.lyr);
+  markedItems.delete(key);
+  _updateMarkedPanel();
+  scheduleOverlap();
+}
+
+function clearAllMarked() {
+  markedLayer.clearLayers();
+  markedItems.clear();
+  _updateMarkedPanel();
+  scheduleOverlap();
+}
+
+function applyMarkedToExcluded() {
+  if (!markedItems.size) return;
+  const ta = $('excInput');
+  const existing = ta.value.trim();
+  const newLines = [...markedItems.values()].map(i => i.name).join('\n');
+  ta.value = existing ? existing + '\n' + newLines : newLines;
+  clearAllMarked();
+  loadExcluded();
+}
+
+function _updateMarkedPanel() {
+  const panel = $('markedPanel');
+  if (!markedItems.size) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  $('markedList').innerHTML = [...markedItems.entries()].map(([k, {name}]) =>
+    `<div class="marked-item"><span>• ${name}</span><span class="marked-del" onclick="removeMarked('${esc(k)}')">✕</span></div>`
+  ).join('');
+}
+
+// ── Build neutral layer (gray) ────────────────────────────────────────────────
+function buildNeuLayer(fc) {
+  const lyrGroup = L.geoJSON(fc, {
+    style: SN,
+    onEachFeature(feat, lyr) {
+      const p   = feat.properties;
+      const zip = p.ZCTA5CE20 || p.zip;
+      const label = p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '');
+      lyr.bindTooltip(label, {sticky:true, offset:[10,0], className:'nt'});
+
+      lyr.on('mousemove', function(e) {
+        if (!window.turf) return;
+        try {
+          const pt = turf.point([e.latlng.lng, e.latlng.lat]);
+          const seen = new Set(); const labels = [];
+          neuLayer.eachLayer(grp => {
+            const inner = [];
+            if (grp.eachLayer) grp.eachLayer(l => inner.push(l)); else inner.push(grp);
+            for (const l of inner) {
+              if (!l.feature?.geometry) continue;
+              if (l.getBounds && !l.getBounds().contains(e.latlng)) continue;
+              try {
+                if (turf.booleanPointInPolygon(pt, l.feature)) {
+                  const lbl = l.feature.properties.display_name || '';
+                  if (lbl && !seen.has(lbl)) { seen.add(lbl); labels.push(lbl); }
+                }
+              } catch(_) {}
+            }
+          });
+          const tip = this.getTooltip();
+          if (tip) tip.setContent(labels.length > 1 ? labels.join(' | ') : label);
+        } catch(_) {}
+      });
+
+      lyr.on('contextmenu', function(e) {
+        L.DomEvent.preventDefault(e.originalEvent||e);
+        setActiveLayer(this, SN);
+        this.setStyle(SNH); this.bringToFront();
+        const rawLine = p._raw || '';
+        const removeBtn = rawLine
+          ? `<button class="tb tb-g" onclick="removeNeutral('${esc(rawLine)}')">✕ Убрать из нейтральных</button>`
+          : '';
+        showTip(e,
+          `<span style="color:#616161">${label}</span>`,
+          'Нейтральная зона',
+          `${removeBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+      });
+    }
+  });
+  fc.features?.forEach(f => {
+    const raw = f.properties?._raw;
+    if (raw) neuLayers.set(raw, lyrGroup);
+  });
+  return lyrGroup;
+}
+
+function removeNeutral(raw) {
+  hideTipNow();
+  const lg = neuLayers.get(raw);
+  if (lg) neuLayer.removeLayer(lg);
+  neuLayers.delete(raw);
+  const ta = $('neuInput');
+  ta.value = ta.value.split('\n').filter(l => l.trim() !== raw.trim() && l.trim() !== '').join('\n');
+}
+
 // ── Exclude actions ───────────────────────────────────────────────────────────
 async function excludeAsZip(zip){
-  hideTip();
+  hideTipNow();
   const key=`zip:${zip}`;
   if(exclusions.has(key)) return;
   try{
@@ -474,7 +935,7 @@ async function excludeAsZip(zip){
 }
 
 async function excludeAsCounty(fips, name, stAbbr, stName){
-  hideTip();
+  hideTipNow();
   const label = `${name}${stAbbr?', '+stAbbr:''}`;
   const key = `county:${fips||label}`;
   if(exclusions.has(key)) return;
@@ -488,7 +949,7 @@ async function excludeAsCounty(fips, name, stAbbr, stName){
 }
 
 async function excludeAsState(fips, name, abbr){
-  hideTip();
+  hideTipNow();
   const key = `state:${fips||name}`;
   if(exclusions.has(key)) return;
   const display = name||(abbr?'State '+abbr:'');
@@ -505,10 +966,11 @@ function addExclusion(key, name, fc){
   const lyr = buildExcLayer(fc, key).addTo(excLayer);
   exclusions.set(key, {name, lyr});
   updateExcStat();
+  scheduleOverlap();
 }
 
 function removeExclusion(key){
-  hideTip();
+  hideTipNow();
   const e = exclusions.get(key);
   if(!e) return;
   excLayer.removeLayer(e.lyr);
@@ -517,7 +979,93 @@ function removeExclusion(key){
   const ta=$('excInput');
   const lines = ta.value.split('\n').filter(l=>l.trim()!==e.name&&l.trim()!=='');
   ta.value = lines.join('\n');
+  // Add to removed list
+  removedItems.push(e.name);
+  $('removedList').innerHTML = removedItems.map(s=>`• ${s}`).join('<br>');
+  $('removedPanel').style.display = '';
   updateExcStat();
+  scheduleOverlap();
+}
+
+function removeInclusion(raw){
+  hideTipNow();
+  const lg = incLayers.get(raw);
+  if (lg) incLayer.removeLayer(lg);
+  incLayers.delete(raw);
+  const ta=$('incInput');
+  const lines = ta.value.split('\n').filter(l=>l.trim()!==raw.trim()&&l.trim()!=='');
+  ta.value = lines.join('\n');
+  removedIncItems.push(raw);
+  $('removedIncList').innerHTML = removedIncItems.map(s=>`• ${s}`).join('<br>');
+  $('removedIncPanel').style.display = '';
+  scheduleOverlap();
+}
+
+function clearRemovedInc(){
+  removedIncItems.length = 0;
+  $('removedIncList').innerHTML = '';
+  $('removedIncPanel').style.display = 'none';
+}
+
+function clearRemoved(){
+  removedItems.length = 0;
+  $('removedList').innerHTML = '';
+  $('removedPanel').style.display = 'none';
+}
+
+// ── Green intersection overlay ────────────────────────────────────────────────
+let _overlapTimer = null;
+function scheduleOverlap(){
+  if (_overlapTimer) clearTimeout(_overlapTimer);
+  _overlapTimer = setTimeout(_doOverlap, 500);
+}
+
+function _collectFeats(group) {
+  const feats = [];
+  group.eachLayer(child => {
+    if (child.eachLayer) child.eachLayer(l => { if(l.feature) feats.push(l.feature); });
+    else if (child.feature) feats.push(child.feature);
+  });
+  return feats;
+}
+
+function _doOverlap() {
+  if (!window.turf) return;
+
+  const incLyrs = [];
+  incLayer.eachLayer(grp => {
+    if (grp.eachLayer) grp.eachLayer(l => incLyrs.push(l));
+    else incLyrs.push(grp);
+  });
+
+  // Reset all included layers to blue (skip active/highlighted layer)
+  incLyrs.forEach(l => { if (l.setStyle && l !== _activeLayer) l.setStyle(SI); });
+
+  const excFeats = [..._collectFeats(excLayer), ..._collectFeats(markedLayer)];
+  if (!excFeats.length || !incLyrs.length) return;
+
+  const useCentroid = incLyrs.length > 80;
+  const excBboxes = excFeats.map(f => ({ f, bb: turf.bbox(f) }));
+
+  for (const l of incLyrs) {
+    if (!l.feature?.geometry) continue;
+    const ib = turf.bbox(l.feature);
+    for (const {f: exc, bb: eb} of excBboxes) {
+      if (ib[0]>eb[2]||ib[2]<eb[0]||ib[1]>eb[3]||ib[3]<eb[1]) continue;
+      try {
+        let overlaps = false;
+        if (useCentroid) {
+          overlaps = turf.booleanPointInPolygon(turf.centroid(l.feature), exc);
+        } else {
+          overlaps = !!turf.intersect(turf.feature(l.feature.geometry), turf.feature(exc.geometry));
+        }
+        if (overlaps) {
+          if (l !== _activeLayer) l.setStyle(SO);
+          break;
+        }
+      } catch(_) {}
+    }
+  }
 }
 
 function appendExcTA(line){
@@ -533,41 +1081,241 @@ function updateExcStat(){
 
 // ── Load included ─────────────────────────────────────────────────────────────
 async function loadIncluded(){
-  const zips = parseZips($('incInput').value);
-  if(!zips.length){ setStat('iStat','Нет ZIP-кодов'); return; }
-  clearIncluded(); setProg('iProg',2);
+  const gen = ++_incGen;
+  const abort = () => _incGen !== gen;
 
-  const BATCH=400;
-  const batches=[];
-  for(let i=0;i<zips.length;i+=BATCH) batches.push(zips.slice(i,i+BATCH));
+  const rawLines = $('incInput').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!rawLines.length){ setStat('iStat','Нет данных'); return; }
+  incLayer.clearLayers(); incLayers.clear(); overlapLayer.clearLayers(); setProg('iProg',2);
 
-  let loaded=0, notFound=[];
-  for(let i=0;i<batches.length;i++){
-    setStat('iStat',`Батч ${i+1}/${batches.length}…`);
-    setProg('iProg', Math.round(5 + i/batches.length*90));
-    try{
-      const fc = await(await fetch(`/api/zcta?zips=${batches[i].join(',')}`)).json();
-      const found = new Set(fc.features.map(f=>f.properties.ZCTA5CE20||f.properties.zip));
-      batches[i].filter(z=>!found.has(z)).forEach(z=>notFound.push(z));
-      loaded += found.size;
-      if(fc.features.length) buildIncLayer(fc).addTo(incLayer);
-    }catch(e){ setStat('iStat',`❌ ${e.message}`); }
+  const items  = rawLines.map(classifyExcLine).filter(Boolean);
+  const byType = {
+    zip:    items.filter(i=>i.type==='zip'),
+    state:  items.filter(i=>i.type==='state'),
+    county: items.filter(i=>i.type==='county'),
+    cd:     items.filter(i=>i.type==='cd'),
+    dma:    items.filter(i=>i.type==='dma'),
+    place:  items.filter(i=>i.type==='place'),
+    radius: items.filter(i=>i.type==='radius'),
+  };
+  const total = items.length;
+  let loaded = 0;
+  const notFoundList = [];
+
+  const tick = (label) => {
+    setProg('iProg', Math.round(5 + loaded/total*90));
+    setStat('iStat', `${label} (${loaded}/${total})…`);
+  };
+
+  // 1. ZIPs — batch
+  if (byType.zip.length) {
+    const BATCH = 400;
+    for (let i = 0; i < byType.zip.length; i += BATCH) {
+      if (abort()) return;
+      const batch = byType.zip.slice(i, i+BATCH);
+      tick('ZIP-коды');
+      try {
+        const fc = await(await fetch(`/api/zcta?zips=${batch.map(z=>z.zip).join(',')}`)).json();
+        if (abort()) return;
+        const found = new Set(fc.features.map(f=>f.properties.ZCTA5CE20||f.properties.zip));
+        batch.filter(z=>!found.has(z.zip)).forEach(z=>notFoundList.push(z.raw));
+        loaded += found.size;
+        if(fc.features.length) buildIncLayer(fc).addTo(incLayer);
+      } catch { batch.forEach(z=>notFoundList.push(z.raw)); }
+    }
   }
+
+  // 2. Congressional districts — batch TIGERweb
+  if (byType.cd.length) {
+    if (abort()) return;
+    tick('Округа Конгресса');
+    const cdMap = await fetchAllCDs(byType.cd);
+    if (abort()) return;
+    for (const item of byType.cd) {
+      const feat = cdMap.get(`${item.state}:${item.num}`);
+      if (feat) {
+        feat.properties.display_name = item.display;
+        feat.properties._raw = item.raw;
+        buildIncLayer({type:'FeatureCollection',features:[feat]}).addTo(incLayer);
+        loaded++;
+      } else notFoundList.push(item.raw);
+    }
+    tick('Округа Конгресса');
+  }
+
+  // 3. States — local DB → TIGERweb
+  if (byType.state.length) {
+    if (abort()) return;
+    tick('Штаты');
+    const localMap = await searchLocalBatch(byType.state.map(i=>i.name));
+    if (abort()) return;
+    for (const item of byType.state) {
+      const fc = localMap.get(item.name);
+      if (fc) {
+        fc.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
+        buildIncLayer(fc).addTo(incLayer); loaded++;
+      } else {
+        if (abort()) return;
+        try {
+          const fc2 = await fetchStateBoundary(item.name);
+          if (abort()) return;
+          if (hasPolygon(fc2)) {
+            fc2.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
+            buildIncLayer(fc2).addTo(incLayer); loaded++;
+          } else notFoundList.push(item.raw);
+        } catch { notFoundList.push(item.raw); }
+      }
+    }
+    tick('Штаты');
+  }
+
+  // 4. Counties — local DB → TIGERweb
+  if (byType.county.length) {
+    if (abort()) return;
+    tick('Округа');
+    const localMap = await fetchCountiesBatchLocal(byType.county);
+    if (abort()) return;
+    const needTiger = [];
+    for (const item of byType.county) {
+      const stAbbr = toStateAbbr(item.state).toLowerCase();
+      const feat = localMap.get(`${item.name.toLowerCase()}:${stAbbr}`)
+                || localMap.get(`${item.name.toLowerCase()}:`);
+      if (feat) {
+        feat.properties.display_name = item.display; feat.properties._raw = item.raw;
+        buildIncLayer({type:'FeatureCollection',features:[feat]}).addTo(incLayer); loaded++;
+      } else needTiger.push(item);
+    }
+    if (needTiger.length) {
+      if (abort()) return;
+      const tigerMap = await fetchAllCounties(needTiger);
+      if (abort()) return;
+      for (const item of needTiger) {
+        const feat = tigerMap.get(`${item.name.toLowerCase()}:${item.state.toLowerCase()}`)
+                  || tigerMap.get(`${item.name.toLowerCase()}:`);
+        if (feat) {
+          feat.properties.display_name = item.display; feat.properties._raw = item.raw;
+          buildIncLayer({type:'FeatureCollection',features:[feat]}).addTo(incLayer); loaded++;
+        } else notFoundList.push(item.raw);
+      }
+    }
+    tick('Округа');
+  }
+
+  // 5. DMA (Nielsen media markets) — server-side union of member counties
+  if (byType.dma.length) {
+    if (abort()) return;
+    tick('DMA-рынки');
+    const dmaMap = await fetchDmaBatch(byType.dma);
+    if (abort()) return;
+    for (const item of byType.dma) {
+      const result = dmaMap.get(item.key);
+      if (result?.fc?.features?.length) {
+        result.fc.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
+        buildIncLayer(result.fc).addTo(incLayer); loaded++;
+      } else notFoundList.push(item.raw);
+    }
+    tick('DMA-рынки');
+  }
+
+  // 6. Places — local DB → Nominatim
+  if (byType.place.length) {
+    if (abort()) return;
+    tick('Места');
+    const dbMap = await searchLocalBatch(byType.place.map(i=>i.query));
+    if (abort()) return;
+    const needNom = [];
+    for (const item of byType.place) {
+      const fc = dbMap.get(item.query);
+      if (fc) {
+        fc.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
+        buildIncLayer(fc).addTo(incLayer); loaded++;
+      } else needNom.push(item);
+    }
+    for (const item of needNom) {
+      if (abort()) return;
+      tick(`Nominatim: ${item.display}`);
+      try {
+        let fc = await nomSearch(item.query, {countrycodes:'us'});
+        if (abort()) return;
+        if (!hasPolygon(fc)) fc = await nomSearch(item.query);
+        if (abort()) return;
+        if (hasPolygon(fc)) {
+          fc.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
+          buildIncLayer(fc).addTo(incLayer); loaded++;
+        } else notFoundList.push(item.raw);
+      } catch { notFoundList.push(item.raw); }
+      tick('Места');
+    }
+  }
+
+  // 7. Radius circles — batched parallel (10 at a time to avoid hammering Photon)
+  if (byType.radius.length) {
+    if (abort()) return;
+    const all = byType.radius;
+    let rDone = 0;
+    tick(`Радиусы (0/${all.length})…`);
+    const radiusResults = [];
+    for (let i = 0; i < all.length; i += 10) {
+      if (abort()) return;
+      const batch = all.slice(i, i + 10);
+      const res = await Promise.all(batch.map(async item => {
+        try { const fc = await fetchRadius(item); tick(`Радиусы (${++rDone}/${all.length})…`); return { item, fc }; }
+        catch { return { item, fc: null }; }
+      }));
+      radiusResults.push(...res);
+    }
+    if (abort()) return;
+    for (const { item, fc } of radiusResults) {
+      if (fc?.features?.length) {
+        fc.features.forEach(f=>f.properties._raw=item.raw);
+        buildIncLayer(fc).addTo(incLayer); loaded++;
+      } else notFoundList.push(item.raw);
+    }
+  }
+
+  if (abort()) return;
   setProg('iProg',100);
   if(incLayer.getLayers().length) map.fitBounds(incLayer.getBounds(),{padding:[30,30]});
-  const p=[`✅ <b>${loaded}</b>/${zips.length} загружено`];
-  if(notFound.length) p.push(`⚠️ не найдено: <b>${notFound.length}</b>`);
-  setStat('iStat', p.join(' · '));
+  scheduleOverlap();
+
+  const parts = [`✅ <b>${loaded}</b>/${total} загружено`];
+  if (notFoundList.length) {
+    const listHtml = notFoundList.map(s=>`<span style="color:#c62828">• ${s}</span>`).join('<br>');
+    setStat('iStat', parts.join(' · ') + ` · ⚠️ не найдено: <b>${notFoundList.length}</b><div style="margin-top:4px;line-height:1.6">${listHtml}</div>`);
+  } else {
+    setStat('iStat', parts.join(' · '));
+  }
 }
 
 // ── Input classifier ─────────────────────────────────────────────────────────
 // Returns {type, zip|name|query, state, display, key}
 function classifyExcLine(raw) {
-  // Strip trailing country qualifiers so "Virginia, United States" → "Virginia"
-  let line = raw
+  let line = raw.trim();
+  if (!line) return null;
+
+  // ── Nielsen DMA® media market, e.g.:
+  // "Knoxville, TN, Tennessee, United States (Nielsen DMA®)"
+  // "Tri-Cities, TN-VA, Virginia, United States (Nielsen DMA®)"
+  // Must run before the generic trailing-paren stripper below — that regex
+  // is letter-only and doesn't match "®", so it never strips this suffix.
+  const dmaM = line.match(/^(.+?),\s*([A-Za-z]{2}(?:-[A-Za-z]{2})*)\s*,\s*([^,]+?)\s*,\s*United States\s*\(\s*Nielsen\s*DMA[®\s]*\)\s*$/i);
+  if (dmaM) {
+    const name = dmaM[1].trim();
+    const states = dmaM[2].toUpperCase();
+    const display = `${name}, ${states} (Nielsen DMA)`;
+    return { raw, type:'dma', name, states, display, key:`dma:${name.toLowerCase()}:${states}` };
+  }
+
+  // Strip trailing type annotations: "(city)", "(county)", "(state/province)", etc.
+  // Uses letter-only pattern — does NOT strip coordinate strings like "(32.8,-116.7)"
+  line = line.replace(/\s*\([a-zA-Z\/\s-]{3,}\)\s*$/, '').trim();
+
+  // Strip trailing country qualifiers
+  line = line
     .replace(/,?\s*(united states of america|united states|u\.s\.a?\.)\s*$/i, '')
     .replace(/,?\s*\busa\b\s*$/i, '')
     .replace(/,?\s*\bcanada\b\s*$/i, '')
+    .replace(/,\s*United\s*$/i, '')   // truncated ", United" at end
     .replace(/,\s*$/, '')
     .trim();
   if (!line) return null;
@@ -596,14 +1344,28 @@ function classifyExcLine(raw) {
     return { raw, type:'cd', state, num: padded, display, key:`cd:${state}:${padded}` };
   }
 
-  // ── County (has "county" keyword) ──
-  if (/\bcounty\b/i.test(first)) {
-    const countyName = first.replace(/\s*county\s*$/i, '').trim();
+  // ── County / Parish / Borough (Louisiana parishes, Alaska boroughs) ──
+  if (/\b(county|parish|borough)\b/i.test(first)) {
+    const sfxM   = first.match(/\b(county|parish|borough)\b/i);
+    const suffix = sfxM ? sfxM[1].toLowerCase() : 'county';
+    const countyName = first.replace(/\s*(county|parish|borough)\s*$/i, '').trim();
     const state = parts.length > 1 ? parts[parts.length - 1].trim() : '';
     const display = first + (state ? `, ${state}` : '');
-    return { raw, type:'county', name:countyName, state, display,
+    return { raw, type:'county', name:countyName, state, display, suffix,
              query: first + (state ? `, ${state}` : ''),
              key: `county:${display.toLowerCase()}` };
+  }
+
+  // ── Radius: "25.0|mi|Fresno, CA"  or  "20 miles around Denver, CO" ──
+  const rpipe   = line.match(/^(\d+(?:\.\d+)?)\s*\|mi(?:les?)?\|\s*(.+)$/i);
+  const raround = !rpipe && line.match(/^(\d+(?:\.\d+)?)\s*mi(?:les?)?\s+around\s+(.+)$/i);
+  const rm = rpipe || raround;
+  if (rm) {
+    const dist  = parseFloat(rm[1]);
+    const place = rm[2].trim();
+    return { raw, type:'radius', dist, place,
+             display: `${dist} mi вокруг ${place}`,
+             key: `radius:${dist}:${place.toLowerCase()}` };
   }
 
   // ── Everything else: country, province, state by full name, city ──
@@ -623,6 +1385,105 @@ async function nomSearch(query, opts = {}) {
   if (opts.countrycodes) p.set('countrycodes', opts.countrycodes);
   if (opts.featuretype)  p.set('featuretype',  opts.featuretype);
   return nominatim(`/search?${p}`);
+}
+
+// Geocode a place name → [lng, lat].
+// Uses Photon (Komoot) — OSM data, no rate limit, parallel-friendly.
+// Falls back to Nominatim (rate-limited) only if Photon fails.
+async function geocodePoint(query) {
+  // Check localStorage cache first
+  const ck = query.toLowerCase();
+  const cached = _geoCache(ck);
+  if (cached) return cached;
+
+  // Photon: fast, no rate limit, great for city/address queries
+  try {
+    const url = 'https://photon.komoot.io/api/?' +
+      new URLSearchParams({ q: query, limit: '1', lang: 'en' });
+    const j = await (await fetch(url)).json();
+    const coords = j?.features?.[0]?.geometry?.coordinates;
+    if (coords && !coords.some(isNaN)) {
+      const pt = [coords[0], coords[1]];
+      _geoCache(ck, pt);
+      return pt;
+    }
+  } catch(e) { console.warn('Photon failed:', query, e.message); }
+
+  // Nominatim fallback — goes through serial queue, no rate-limit race
+  try {
+    const p = new URLSearchParams({ q: query, format: 'json', limit: '1', countrycodes: 'us' });
+    const res = await nominatim(`/search?${p}`);
+    const arr = Array.isArray(res) ? res : res?.features?.map ? null : null;
+    const item0 = Array.isArray(res) ? res[0] : null;
+    if (item0?.lat) {
+      const pt = [parseFloat(item0.lon), parseFloat(item0.lat)];
+      _geoCache(ck, pt);
+      return pt;
+    }
+    // GeoJSON fallback (in case Nominatim returns geojson)
+    const f = res?.features?.[0];
+    if (f?.geometry?.coordinates) {
+      const coords = f.geometry.type === 'Point'
+        ? f.geometry.coordinates
+        : turf.centroid(f).geometry.coordinates;
+      const pt = [coords[0], coords[1]];
+      _geoCache(ck, pt);
+      return pt;
+    }
+  } catch(e) { console.warn('geocodePoint Nominatim failed:', query, e.message); }
+  return null;
+}
+
+// localStorage cache for geocoded radius centers (survives page reload)
+function _geoCache(key, val) {
+  try {
+    const s = '_rc';
+    if (val !== undefined) {
+      const c = JSON.parse(localStorage.getItem(s) || '{}');
+      c[key] = val;
+      localStorage.setItem(s, JSON.stringify(c));
+    } else {
+      return JSON.parse(localStorage.getItem(s) || '{}')[key] || null;
+    }
+  } catch { return null; }
+}
+
+// Build a circle polygon around a place or coordinates
+async function fetchRadius(item) {
+  let lngLat;
+  const p = item.place;
+
+  // Format: "(lat,lng)"
+  const coordM = p.match(/^\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)$/);
+  if (coordM) {
+    lngLat = [parseFloat(coordM[2]), parseFloat(coordM[1])];
+  }
+
+  // Format: "Lat: 34.05 Long: -118.24" or "Lat 34.05 Long -118.24"
+  if (!lngLat) {
+    const llM = p.match(/lat(?:itude)?[:\s]+(-?\d+\.?\d*)\s+long(?:itude)?[:\s]+(-?\d+\.?\d*)/i);
+    if (llM) lngLat = [parseFloat(llM[2]), parseFloat(llM[1])];
+  }
+
+  // Extract ZIP from address → use local ZCTA DB (fast, no Nominatim)
+  if (!lngLat) {
+    const zipM = p.match(/\b(\d{5})(?:-\d{4})?\b/);
+    if (zipM) {
+      try {
+        const fc = await (await fetch(`/api/zcta?zips=${zipM[1]}`)).json();
+        if (fc?.features?.length)
+          lngLat = turf.centroid(fc.features[0]).geometry.coordinates;
+      } catch(_) {}
+    }
+  }
+
+  // Geocode via Photon → Nominatim (cache handled inside geocodePoint)
+  if (!lngLat) lngLat = await geocodePoint(p);
+
+  if (!lngLat || lngLat.some(isNaN)) return null;
+  const circle = turf.circle(lngLat, item.dist, { steps: 64, units: 'miles' });
+  circle.properties = { display_name: item.display, region_type: 'radius' };
+  return { type: 'FeatureCollection', features: [circle] };
 }
 
 // Fetch US state boundary: local DB (admin1) → TIGERweb → Nominatim
@@ -660,7 +1521,7 @@ async function fetchCountyBoundary(name, state) {
   return nomSearch(q + ' USA', { countrycodes:'us' });
 }
 
-// Batch county fetch for loadExcluded — one TIGERweb request for all counties
+// Batch county fetch for loadExcluded — parallel TIGERweb requests
 async function fetchAllCounties(countyItems) {
   const tl = await getTigerLayers();
   if (!tl.countyUrl) return new Map();
@@ -674,11 +1535,17 @@ async function fetchAllCounties(countyItems) {
       : `NAME='${safe}'`;
   });
 
-  // TIGERweb has a URL limit — chunk into batches of 80
+  // TIGERweb has a URL limit — chunk into batches of 80, fire ALL in parallel
+  const chunks = [];
+  for (let i = 0; i < conds.length; i += 80)
+    chunks.push(conds.slice(i, i + 80));
+
+  const responses = await Promise.all(
+    chunks.map(chunk => tigerQuery(tl.countyUrl, chunk.join(' OR '), 'NAME,STUSAB,NAMELSAD', 500))
+  );
+
   const result = new Map();
-  for (let i = 0; i < conds.length; i += 80) {
-    const where = conds.slice(i, i + 80).join(' OR ');
-    const fc = await tigerQuery(tl.countyUrl, where, 'NAME,STUSAB,NAMELSAD', 500);
+  for (const fc of responses) {
     if (!fc) continue;
     for (const feat of fc.features) {
       const n = (feat.properties.NAME || '').toLowerCase();
@@ -689,6 +1556,54 @@ async function fetchAllCounties(countyItems) {
       }
     }
   }
+  return result;
+}
+
+// Batch county fetch via the optimised local-DB endpoint —
+// one POST with all county items, returns Map "name:state" → feature
+async function fetchCountiesBatchLocal(countyItems) {
+  const result = new Map();
+  if (!countyItems.length) return result;
+  const CHUNK = 500;
+  for (let i = 0; i < countyItems.length; i += CHUNK) {
+    const chunk = countyItems.slice(i, i + CHUNK);
+    try {
+      const r = await fetch('/api/counties-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(chunk.map(item => ({
+          name:  item.name,
+          state: toStateAbbr(item.state)
+        })))
+      });
+      const data = await r.json();
+      for (const [key, feat] of Object.entries(data)) result.set(key, feat);
+    } catch(e) { console.warn('counties-batch failed:', e); }
+  }
+  return result;
+}
+
+// Batch DMA fetch — one POST with all DMA items, returns Map item.key → {label, fc}
+// fc is a FeatureCollection of the member counties (server builds it from
+// the bundled Nielsen DMA↔county crosswalk).
+async function fetchDmaBatch(dmaItems) {
+  const result = new Map();
+  if (!dmaItems.length) return result;
+  try {
+    const r = await fetch('/api/dma-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dmaItems.map(item => ({
+        city: item.name,
+        states: item.states.split('-')
+      })))
+    });
+    const data = await r.json();
+    for (const item of dmaItems) {
+      const key = `${item.name.toLowerCase()}|${item.states.split('-').sort().join(',')}`;
+      if (data[key]) result.set(item.key, data[key]);
+    }
+  } catch(e) { console.warn('dma-batch failed:', e); }
   return result;
 }
 
@@ -726,14 +1641,19 @@ async function searchLocalBatch(queries) {
 
 // ── Load excluded ─────────────────────────────────────────────────────────────
 async function loadExcluded() {
+  const gen = ++_excGen;
+  const abort = () => _excGen !== gen;
+
   const rawLines = $('excInput').value.split('\n').map(l => l.trim()).filter(Boolean);
   if (!rawLines.length) { setStat('eStat','Нет данных'); return; }
 
   // Check if Natural Earth data is loaded
   const st = await getServerStatus();
+  if (abort()) return;
   if (!st.has_countries || !st.has_admin1) {
     setStat('eStat', '⚠️ Запустите python3 setup.py — нужны справочники стран!');
     await sleep(3000);
+    if (abort()) return;
   }
 
   // Classify all lines first — show summary before starting
@@ -743,7 +1663,9 @@ async function loadExcluded() {
     state:  items.filter(i => i.type === 'state'),
     county: items.filter(i => i.type === 'county'),
     cd:     items.filter(i => i.type === 'cd'),
+    dma:    items.filter(i => i.type === 'dma'),
     place:  items.filter(i => i.type === 'place'),
+    radius: items.filter(i => i.type === 'radius'),
   };
   const total = items.length;
   const summary = [
@@ -751,13 +1673,17 @@ async function loadExcluded() {
     byType.state.length  && `${byType.state.length} штатов`,
     byType.county.length && `${byType.county.length} округов`,
     byType.cd.length     && `${byType.cd.length} округов Конгресса`,
+    byType.dma.length    && `${byType.dma.length} DMA`,
     byType.place.length  && `${byType.place.length} мест`,
+    byType.radius.length && `${byType.radius.length} радиусов`,
   ].filter(Boolean).join(', ');
   setStat('eStat', `Найдено: ${summary}`);
   setProg('eProg', 2);
   await sleep(300);
+  if (abort()) return;
 
   let done = 0, err = 0;
+  const notFoundList = [];
   const tick = (label) => {
     setProg('eProg', Math.round(5 + (done + err) / total * 90));
     setStat('eStat', `${label} (${done + err}/${total})…`);
@@ -769,9 +1695,11 @@ async function loadExcluded() {
     const newZips = byType.zip.filter(i => !exclusions.has(i.key));
     const BATCH = 400;
     for (let i = 0; i < newZips.length; i += BATCH) {
+      if (abort()) return;
       const batch = newZips.slice(i, i + BATCH);
       try {
         const fc = await (await fetch(`/api/zcta?zips=${batch.map(z=>z.zip).join(',')}`)).json();
+        if (abort()) return;
         const foundSet = new Set(fc.features.map(f => f.properties.ZCTA5CE20 || f.properties.zip));
         for (const item of batch) {
           if (foundSet.has(item.zip)) {
@@ -779,18 +1707,20 @@ async function loadExcluded() {
             feat.properties.display_name = item.display;
             addExclusion(item.key, item.display, { type:'FeatureCollection', features:[feat] });
             done++;
-          } else err++;
+          } else { err++; notFoundList.push(item.raw); }
         }
-      } catch { err += batch.length; }
+      } catch { err += batch.length; batch.forEach(i => notFoundList.push(i.raw)); }
       tick('ZIP-коды');
     }
   }
 
   // ── 2. Congressional districts — one batch TIGERweb query per state group ──
   if (byType.cd.length) {
+    if (abort()) return;
     tick('Округа Конгресса');
     const newCDs = byType.cd.filter(i => !exclusions.has(i.key));
-    const cdMap = await fetchAllCDs(newCDs);  // 1–4 total network requests
+    const cdMap = await fetchAllCDs(newCDs);
+    if (abort()) return;
     for (const item of byType.cd) {
       if (exclusions.has(item.key)) { done++; continue; }
       const feat = cdMap.get(`${item.state}:${item.num}`);
@@ -798,18 +1728,20 @@ async function loadExcluded() {
         feat.properties.display_name = item.display;
         addExclusion(item.key, item.display, { type:'FeatureCollection', features:[feat] });
         done++;
-      } else err++;
+      } else { err++; notFoundList.push(item.raw); }
     }
     tick('Округа Конгресса');
   }
 
   // ── 4. States (2-letter abbr only) — batch local DB → TIGERweb ──
   if (byType.state.length) {
+    if (abort()) return;
     const newStates = byType.state.filter(i => !exclusions.has(i.key));
     done += byType.state.length - newStates.length;
     if (newStates.length) {
       tick('Штаты');
       const localMap = await searchLocalBatch(newStates.map(i => i.name));
+      if (abort()) return;
       for (const item of newStates) {
         const fc = localMap.get(item.name);
         if (fc) {
@@ -817,44 +1749,48 @@ async function loadExcluded() {
           addExclusion(item.key, item.display, fc);
           done++;
         } else {
-          // TIGERweb fallback for abbreviations
+          if (abort()) return;
           try {
             const fc2 = await fetchStateBoundary(item.name);
+            if (abort()) return;
             if (hasPolygon(fc2)) {
               fc2.features.forEach(f => f.properties.display_name = item.display);
               addExclusion(item.key, item.display, fc2);
               done++;
-            } else err++;
-          } catch { err++; }
+            } else { err++; notFoundList.push(item.raw); }
+          } catch { err++; notFoundList.push(item.raw); }
         }
       }
       tick('Штаты');
     }
   }
 
-  // ── 5. Counties — batch local DB → batch TIGERweb → Nominatim for misses ──
+  // ── 5. Counties — optimised: single POST to /api/counties-batch → TIGERweb → Nominatim ──
   if (byType.county.length) {
+    if (abort()) return;
     const newCounties = byType.county.filter(i => !exclusions.has(i.key));
     done += byType.county.length - newCounties.length;
 
     if (newCounties.length) {
       tick('Округа');
-
-      // Batch local DB lookup
-      const localMap = await searchLocalBatch(newCounties.map(i => i.query));
+      const localMap = await fetchCountiesBatchLocal(newCounties);
+      if (abort()) return;
       const needTiger = [];
       for (const item of newCounties) {
-        const fc = localMap.get(item.query);
-        if (fc) {
-          fc.features.forEach(f => f.properties.display_name = item.display);
-          addExclusion(item.key, item.display, fc);
+        const stAbbr = toStateAbbr(item.state).toLowerCase();
+        const feat = localMap.get(`${item.name.toLowerCase()}:${stAbbr}`)
+                  || localMap.get(`${item.name.toLowerCase()}:`);
+        if (feat) {
+          feat.properties.display_name = item.display;
+          addExclusion(item.key, item.display, { type:'FeatureCollection', features:[feat] });
           done++;
         } else needTiger.push(item);
       }
 
-      // Batch TIGERweb for remaining
       if (needTiger.length) {
+        if (abort()) return;
         const tigerMap = await fetchAllCounties(needTiger);
+        if (abort()) return;
         const needNominatim = [];
         for (const item of needTiger) {
           const feat = tigerMap.get(`${item.name.toLowerCase()}:${item.state.toLowerCase()}`)
@@ -866,34 +1802,56 @@ async function loadExcluded() {
           } else needNominatim.push(item);
         }
 
-        // Nominatim only for counties not found anywhere
         for (const item of needNominatim) {
+          if (abort()) return;
           tick(`Nominatim: ${item.display}`);
           try {
-            const fc = await nomSearch(`${item.name} county ${item.state} USA`, { countrycodes:'us' });
+            const sfx = item.suffix || 'county';
+            const fc = await nomSearch(`${item.name} ${sfx} ${item.state} USA`, { countrycodes:'us' });
+            if (abort()) return;
             if (hasPolygon(fc)) {
               fc.features.forEach(f => f.properties.display_name = item.display);
               addExclusion(item.key, item.display, fc);
               done++;
-            } else err++;
-          } catch { err++; }
+            } else { err++; notFoundList.push(item.raw); }
+          } catch { err++; notFoundList.push(item.raw); }
         }
       }
       tick('Округа');
     }
   }
 
-  // ── 6. Places: countries, provinces, states by full name, cities ──
+  // ── 6. DMA (Nielsen media markets) — server-side union of member counties ──
+  if (byType.dma.length) {
+    if (abort()) return;
+    const newDmas = byType.dma.filter(i => !exclusions.has(i.key));
+    done += byType.dma.length - newDmas.length;
+    if (newDmas.length) {
+      tick('DMA-рынки');
+      const dmaMap = await fetchDmaBatch(newDmas);
+      if (abort()) return;
+      for (const item of newDmas) {
+        const result = dmaMap.get(item.key);
+        if (result?.fc?.features?.length) {
+          result.fc.features.forEach(f => f.properties.display_name = item.display);
+          addExclusion(item.key, item.display, result.fc);
+          done++;
+        } else { err++; notFoundList.push(item.raw); }
+      }
+      tick('DMA-рынки');
+    }
+  }
+
+  // ── 7. Places: countries, provinces, states by full name, cities ──
   if (byType.place.length) {
+    if (abort()) return;
     const newPlaces = byType.place.filter(i => !exclusions.has(i.key));
-    // Count already-done exclusions
     done += byType.place.length - newPlaces.length;
 
     if (newPlaces.length) {
       setStat('eStat', `Поиск в базе… (${done}/${total})`);
-
-      // ONE batch request to local DB — parallel, no rate limit
       const dbMap = await searchLocalBatch(newPlaces.map(i => i.query));
+      if (abort()) return;
 
       const needNominatim = [];
       for (const item of newPlaces) {
@@ -909,33 +1867,302 @@ async function loadExcluded() {
       }
       tick('База данных');
 
-      // Only unresolved items (cities etc) go to Nominatim
       for (const item of needNominatim) {
+        if (abort()) return;
         tick(`Nominatim: ${item.display}`);
         try {
           let fc = await nomSearch(item.query, { countrycodes:'us' });
-          if (!fc) fc = await nomSearch(item.query);
+          if (abort()) return;
+          if (!hasPolygon(fc)) fc = await nomSearch(item.query);
+          if (abort()) return;
           if (hasPolygon(fc)) {
             const label = fc.features[0]?.properties?.display_name || item.display;
             fc.features.forEach(f => f.properties.display_name = label);
             addExclusion(item.key, label, fc);
             done++;
-          } else err++;
-        } catch { err++; }
+          } else { err++; notFoundList.push(item.raw); }
+        } catch { err++; notFoundList.push(item.raw); }
         tick('Места');
       }
     }
   }
 
+  // ── 8. Radius circles — batched parallel (10 at a time to avoid hammering Photon) ──
+  if (byType.radius.length) {
+    if (abort()) return;
+    const newRadii = byType.radius.filter(i => !exclusions.has(i.key));
+    done += byType.radius.length - newRadii.length;
+    if (newRadii.length) {
+      let rDone = 0;
+      tick(`Радиусы (0/${newRadii.length})…`);
+      const radiusResults = [];
+      for (let i = 0; i < newRadii.length; i += 10) {
+        if (abort()) return;
+        const batch = newRadii.slice(i, i + 10);
+        const res = await Promise.all(batch.map(async item => {
+          try { const fc = await fetchRadius(item); tick(`Радиусы (${++rDone}/${newRadii.length})…`); return { item, fc }; }
+          catch { return { item, fc: null }; }
+        }));
+        radiusResults.push(...res);
+      }
+      if (abort()) return;
+      for (const { item, fc } of radiusResults) {
+        if (fc?.features?.length) {
+          addExclusion(item.key, item.display, fc);
+          done++;
+        } else { err++; notFoundList.push(item.raw); }
+      }
+    }
+  }
+
+  if (abort()) return;
+  scheduleOverlap();
   setProg('eProg', 100);
   const parts = [`✅ <b>${done}</b>/${total} загружено`];
-  if (err) parts.push(`⚠️ не найдено: <b>${err}</b>`);
-  setStat('eStat', parts.join(' · '));
+  if (notFoundList.length) {
+    const listHtml = notFoundList.map(s => `<span style="color:#c62828">• ${s}</span>`).join('<br>');
+    setStat('eStat',
+      parts.join(' · ') +
+      ` · ⚠️ не найдено: <b>${notFoundList.length}</b>` +
+      `<div style="margin-top:4px;line-height:1.6">${listHtml}</div>`
+    );
+  } else {
+    setStat('eStat', parts.join(' · '));
+  }
 }
 
 // ── Clear ─────────────────────────────────────────────────────────────────────
-function clearIncluded(){ incLayer.clearLayers(); setProg('iProg',0); setStat('iStat','Очищено'); }
-function clearExcluded(){ excLayer.clearLayers(); exclusions.clear(); setProg('eProg',0); setStat('eStat','Очищено'); }
+function clearIncluded(){
+  ++_incGen;          // abort any in-flight loadIncluded
+  hideTipNow();
+  $('incInput').value='';
+  incLayer.clearLayers();
+  incLayers.clear();
+  overlapLayer.clearLayers();
+  clearRemovedInc();
+  setProg('iProg',0); setStat('iStat','Готов');
+}
+function clearExcluded(){
+  ++_excGen;          // abort any in-flight loadExcluded
+  hideTipNow();
+  $('excInput').value='';
+  excLayer.clearLayers();
+  exclusions.clear();
+  overlapLayer.clearLayers();
+  setProg('eProg',0); setStat('eStat','Готов');
+}
+
+// ── Load neutral ──────────────────────────────────────────────────────────────
+async function loadNeutral() {
+  const gen = ++_neuGen;
+  const abort = () => _neuGen !== gen;
+
+  const rawLines = $('neuInput').value.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!rawLines.length) { setStat('nStat', 'Нет данных'); return; }
+  neuLayer.clearLayers(); neuLayers.clear(); setProg('nProg', 2);
+
+  const items  = rawLines.map(classifyExcLine).filter(Boolean);
+  const byType = {
+    zip:    items.filter(i => i.type === 'zip'),
+    state:  items.filter(i => i.type === 'state'),
+    county: items.filter(i => i.type === 'county'),
+    cd:     items.filter(i => i.type === 'cd'),
+    dma:    items.filter(i => i.type === 'dma'),
+    place:  items.filter(i => i.type === 'place'),
+    radius: items.filter(i => i.type === 'radius'),
+  };
+  const total = items.length;
+  let loaded = 0;
+  const notFoundList = [];
+
+  const tick = (label) => {
+    setProg('nProg', Math.round(5 + loaded / total * 90));
+    setStat('nStat', `${label} (${loaded}/${total})…`);
+  };
+
+  // 1. ZIPs
+  if (byType.zip.length) {
+    if (abort()) return;
+    tick('ZIP-коды');
+    const BATCH = 400;
+    for (let i = 0; i < byType.zip.length; i += BATCH) {
+      if (abort()) return;
+      const batch = byType.zip.slice(i, i + BATCH);
+      try {
+        const fc = await (await fetch(`/api/zcta?zips=${batch.map(z => z.zip).join(',')}`)).json();
+        if (abort()) return;
+        const found = new Set(fc.features.map(f => f.properties.ZCTA5CE20 || f.properties.zip));
+        batch.filter(z => !found.has(z.zip)).forEach(z => notFoundList.push(z.raw));
+        loaded += found.size;
+        if (fc.features.length) buildNeuLayer(fc).addTo(neuLayer);
+      } catch { batch.forEach(z => notFoundList.push(z.raw)); }
+    }
+  }
+
+  // 2. Congressional districts
+  if (byType.cd.length) {
+    if (abort()) return;
+    tick('Округа Конгресса');
+    const cdMap = await fetchAllCDs(byType.cd);
+    if (abort()) return;
+    for (const item of byType.cd) {
+      const feat = cdMap.get(`${item.state}:${item.num}`);
+      if (feat) {
+        feat.properties.display_name = item.display;
+        feat.properties._raw = item.raw;
+        buildNeuLayer({type:'FeatureCollection',features:[feat]}).addTo(neuLayer);
+        loaded++;
+      } else notFoundList.push(item.raw);
+    }
+  }
+
+  // 3. States
+  if (byType.state.length) {
+    if (abort()) return;
+    tick('Штаты');
+    const localMap = await searchLocalBatch(byType.state.map(i => i.name));
+    if (abort()) return;
+    for (const item of byType.state) {
+      const fc = localMap.get(item.name);
+      if (fc) {
+        fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
+        buildNeuLayer(fc).addTo(neuLayer); loaded++;
+      } else {
+        if (abort()) return;
+        try {
+          const fc2 = await fetchStateBoundary(item.name);
+          if (abort()) return;
+          if (hasPolygon(fc2)) {
+            fc2.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
+            buildNeuLayer(fc2).addTo(neuLayer); loaded++;
+          } else notFoundList.push(item.raw);
+        } catch { notFoundList.push(item.raw); }
+      }
+    }
+  }
+
+  // 4. Counties
+  if (byType.county.length) {
+    if (abort()) return;
+    tick('Округа');
+    const localMap = await fetchCountiesBatchLocal(byType.county);
+    if (abort()) return;
+    const needTiger = [];
+    for (const item of byType.county) {
+      const stAbbr = toStateAbbr(item.state).toLowerCase();
+      const feat = localMap.get(`${item.name.toLowerCase()}:${stAbbr}`)
+                || localMap.get(`${item.name.toLowerCase()}:`);
+      if (feat) {
+        feat.properties.display_name = item.display; feat.properties._raw = item.raw;
+        buildNeuLayer({type:'FeatureCollection',features:[feat]}).addTo(neuLayer); loaded++;
+      } else needTiger.push(item);
+    }
+    if (needTiger.length) {
+      if (abort()) return;
+      const tigerMap = await fetchAllCounties(needTiger);
+      if (abort()) return;
+      for (const item of needTiger) {
+        const feat = tigerMap.get(`${item.name.toLowerCase()}:${item.state.toLowerCase()}`)
+                  || tigerMap.get(`${item.name.toLowerCase()}:`);
+        if (feat) {
+          feat.properties.display_name = item.display; feat.properties._raw = item.raw;
+          buildNeuLayer({type:'FeatureCollection',features:[feat]}).addTo(neuLayer); loaded++;
+        } else notFoundList.push(item.raw);
+      }
+    }
+  }
+
+  // 5. DMA (Nielsen media markets) — server-side union of member counties
+  if (byType.dma.length) {
+    if (abort()) return;
+    tick('DMA-рынки');
+    const dmaMap = await fetchDmaBatch(byType.dma);
+    if (abort()) return;
+    for (const item of byType.dma) {
+      const result = dmaMap.get(item.key);
+      if (result?.fc?.features?.length) {
+        result.fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
+        buildNeuLayer(result.fc).addTo(neuLayer); loaded++;
+      } else notFoundList.push(item.raw);
+    }
+    tick('DMA-рынки');
+  }
+
+  // 6. Places
+  if (byType.place.length) {
+    if (abort()) return;
+    tick('Места');
+    const dbMap = await searchLocalBatch(byType.place.map(i => i.query));
+    if (abort()) return;
+    const needNom = [];
+    for (const item of byType.place) {
+      const fc = dbMap.get(item.query);
+      if (fc) {
+        fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
+        buildNeuLayer(fc).addTo(neuLayer); loaded++;
+      } else needNom.push(item);
+    }
+    for (const item of needNom) {
+      if (abort()) return;
+      tick(`Nominatim: ${item.display}`);
+      try {
+        let fc = await nomSearch(item.query, {countrycodes:'us'});
+        if (abort()) return;
+        if (!hasPolygon(fc)) fc = await nomSearch(item.query);
+        if (abort()) return;
+        if (hasPolygon(fc)) {
+          fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
+          buildNeuLayer(fc).addTo(neuLayer); loaded++;
+        } else notFoundList.push(item.raw);
+      } catch { notFoundList.push(item.raw); }
+    }
+  }
+
+  // 7. Radius circles
+  if (byType.radius.length) {
+    if (abort()) return;
+    let rDone = 0;
+    tick(`Радиусы (0/${byType.radius.length})…`);
+    const radiusResults = [];
+    for (let i = 0; i < byType.radius.length; i += 10) {
+      if (abort()) return;
+      const batch = byType.radius.slice(i, i + 10);
+      const res = await Promise.all(batch.map(async item => {
+        try { const fc = await fetchRadius(item); tick(`Радиусы (${++rDone}/${byType.radius.length})…`); return {item, fc}; }
+        catch { return {item, fc:null}; }
+      }));
+      radiusResults.push(...res);
+    }
+    if (abort()) return;
+    for (const {item, fc} of radiusResults) {
+      if (fc?.features?.length) {
+        fc.features.forEach(f => f.properties._raw = item.raw);
+        buildNeuLayer(fc).addTo(neuLayer); loaded++;
+      } else notFoundList.push(item.raw);
+    }
+  }
+
+  if (abort()) return;
+  setProg('nProg', 100);
+  if (neuLayer.getLayers().length) map.fitBounds(neuLayer.getBounds(), {padding:[30,30]});
+
+  const parts = [`✅ <b>${loaded}</b>/${total} загружено`];
+  if (notFoundList.length) {
+    const listHtml = notFoundList.map(s => `<span style="color:#c62828">• ${s}</span>`).join('<br>');
+    setStat('nStat', parts.join(' · ') + ` · ⚠️ не найдено: <b>${notFoundList.length}</b><div style="margin-top:4px;line-height:1.6">${listHtml}</div>`);
+  } else {
+    setStat('nStat', parts.join(' · '));
+  }
+}
+
+function clearNeutral() {
+  ++_neuGen;
+  hideTipNow();
+  $('neuInput').value = '';
+  neuLayer.clearLayers();
+  neuLayers.clear();
+  setProg('nProg', 0); setStat('nStat', 'Готов');
+}
 </script>
 </body>
 </html>

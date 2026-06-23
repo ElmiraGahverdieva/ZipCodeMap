@@ -6,8 +6,10 @@ Run once; then use start.sh every time.
   python3 setup.py --file cb_...zip        # supply ZCTA zip manually
   python3 setup.py --rebuild               # force full rebuild
 """
+import csv
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -17,6 +19,7 @@ import urllib.request
 import zipfile
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zcta.db")
+DMA_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nielsen_dma_counties.csv")
 
 HEADERS = {
     "User-Agent": (
@@ -302,10 +305,11 @@ def main():
         n_zcta     = table_count(conn, "zcta")
         n_countries = table_count(conn, "countries")
         n_admin1    = table_count(conn, "admin1")
+        n_dma       = table_count(conn, "dma_counties")
         conn.close()
 
-        if n_zcta > 0 and n_countries > 0 and n_admin1 > 0 and not manual_zcta:
-            print(f"✅ База уже полная: {n_zcta} ZIP · {n_countries} стран · {n_admin1} регионов")
+        if n_zcta > 0 and n_countries > 0 and n_admin1 > 0 and n_dma > 0 and not manual_zcta:
+            print(f"✅ База уже полная: {n_zcta} ZIP · {n_countries} стран · {n_admin1} регионов · {n_dma} DMA-записей")
             print("   Для пересоздания: python3 setup.py --rebuild")
             return True
 
@@ -319,6 +323,9 @@ def main():
                 _download_and_build("4/4 Страны мира", NE_COUNTRIES_URL, build_countries, conn)
             if n_admin1 == 0:
                 _download_and_build("4/4 Регионы/провинции мира", NE_ADMIN1_URL, build_admin1, conn)
+            if n_dma == 0:
+                print("  Nielsen DMA (рынки телевещания):")
+                build_dma_counties(conn)
             conn.close()
             db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
             print(f"\n✅ Готово! База: {db_mb:.0f} MB → {DB_PATH}")
@@ -335,7 +342,7 @@ def main():
     conn = sqlite3.connect(DB_PATH)
 
     # 1. ZCTA (US ZIP codes)
-    print("1/4 ZIP-коды (ZCTA):")
+    print("1/5 ZIP-коды (ZCTA):")
     zcta_zip = None
     if manual_zcta:
         if os.path.exists(manual_zcta):
@@ -364,15 +371,15 @@ def main():
                 pass
 
     # 2. Countries (Natural Earth — S3, no blocking)
-    print("2/4 Страны мира (Natural Earth):")
-    _download_and_build("2/4", NE_COUNTRIES_URL, build_countries, conn)
+    print("2/5 Страны мира (Natural Earth):")
+    _download_and_build("2/5", NE_COUNTRIES_URL, build_countries, conn)
 
     # 3. Admin1 worldwide states/provinces (Natural Earth)
-    print("3/4 Регионы/провинции мира (Natural Earth):")
-    _download_and_build("3/4", NE_ADMIN1_URL, build_admin1, conn)
+    print("3/5 Регионы/провинции мира (Natural Earth):")
+    _download_and_build("3/5", NE_ADMIN1_URL, build_admin1, conn)
 
     # 4. US counties (Census — may be blocked)
-    print("4/4 Округа США (Census Bureau):")
+    print("4/5 Округа США (Census Bureau):")
     county_urls = [
         "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_county_500k.zip",
         "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_county_500k.zip",
@@ -392,6 +399,10 @@ def main():
             break
     if not got_counties:
         print("  ⚠️ Округа пропущены (Census заблокирован — ок, данные стран/штатов есть)")
+
+    # 5. Nielsen DMA® (TV media markets) — bundled crosswalk, no download
+    print("5/5 Nielsen DMA (рынки телевещания):")
+    build_dma_counties(conn)
 
     conn.close()
     db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
@@ -432,7 +443,7 @@ def _build_counties(zip_path, conn):
         cfips    = str(rec.get("COUNTYFP", "")).strip()
         name     = str(rec.get("NAME", "")).strip()
         namelsad = str(rec.get("NAMELSAD", name + " County")).strip()
-        abbr     = str(rec.get("STUSAB", "")).strip()
+        abbr     = str(rec.get("STUSPS", rec.get("STUSAB", ""))).strip()
         bx = get_bbox(geom)
         batch.append((sfips + cfips, name, namelsad, sfips, abbr,
                       bx[0], bx[1], bx[2], bx[3],
@@ -440,6 +451,33 @@ def _build_counties(zip_path, conn):
     conn.executemany("INSERT OR REPLACE INTO counties VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
     conn.commit()
     print(f"  ✓ Counties: {len(batch)}")
+
+
+def build_dma_counties(conn):
+    """Nielsen DMA® (TV media market) → county crosswalk, bundled in the repo
+    (no download needed). Most DMAs are whole-county aggregates, so the map
+    can render a DMA boundary as the union of its member counties.
+    """
+    if not os.path.exists(DMA_CSV_PATH):
+        print("  ⚠️ nielsen_dma_counties.csv не найден — DMA пропущены")
+        return
+    with open(DMA_CSV_PATH, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    conn.execute("DROP TABLE IF EXISTS dma_counties")
+    conn.execute("""CREATE TABLE dma_counties (
+        dma_label TEXT, county_name TEXT, state_abbr TEXT
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dma_label ON dma_counties(dma_label)")
+
+    batch = []
+    for row in rows:
+        label = re.sub(r"\s*DMA\s*$", "", row["tvdma"].strip(), flags=re.I).strip()
+        batch.append((label, row["county"].strip(), row["state_ab"].strip().upper()))
+    conn.executemany("INSERT INTO dma_counties VALUES (?,?,?)", batch)
+    conn.commit()
+    n_labels = len({b[0] for b in batch})
+    print(f"  ✓ DMA: {n_labels} рынков ({len(batch)} округов)")
 
 
 if __name__ == "__main__":

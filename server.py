@@ -9,30 +9,137 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import unicodedata
 import urllib.parse
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Timer
 
 PORT = 8888
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "zcta.db")
 
+# Census state FIPS → 2-letter abbreviation (used to patch empty state_abbr in counties table)
+_STATE_FIPS_TO_ABBR = {
+    '01':'AL','02':'AK','04':'AZ','05':'AR','06':'CA','08':'CO','09':'CT',
+    '10':'DE','11':'DC','12':'FL','13':'GA','15':'HI','16':'ID','17':'IL',
+    '18':'IN','19':'IA','20':'KS','21':'KY','22':'LA','23':'ME','24':'MD',
+    '25':'MA','26':'MI','27':'MN','28':'MS','29':'MO','30':'MT','31':'NE',
+    '32':'NV','33':'NH','34':'NJ','35':'NM','36':'NY','37':'NC','38':'ND',
+    '39':'OH','40':'OK','41':'OR','42':'PA','44':'RI','45':'SC','46':'SD',
+    '47':'TN','48':'TX','49':'UT','50':'VT','51':'VA','53':'WA','54':'WV',
+    '55':'WI','56':'WY',
+}
+
+
+_has_table_cache = {}
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA cache_size=-32000")
     return conn
 
 
 def has_table(conn, name):
-    r = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
-    return r is not None
+    if name not in _has_table_cache:
+        r = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+        _has_table_cache[name] = r is not None
+    return _has_table_cache[name]
 
 
 def normalize(s):
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower()
+
+
+# ── Nielsen DMA® matching ─────────────────────────────────────────────────────
+# DMA labels look like "Knoxville, TN - KY" or "Tri - Cities, TN - VA - KY" —
+# city name(s) followed by every state the market spans. We match on the
+# normalized city text plus how many of the query's state abbreviations
+# overlap with the label's, since the same city can be the lead name of
+# slightly different-looking labels across data sources.
+_dma_index_cache = None
+
+
+def _norm_dma_text(s):
+    s = re.sub(r"[-,]", " ", s)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _dma_index(conn):
+    global _dma_index_cache
+    if _dma_index_cache is None:
+        idx = []
+        if has_table(conn, "dma_counties"):
+            for r in conn.execute("SELECT DISTINCT dma_label FROM dma_counties").fetchall():
+                label = r["dma_label"]
+                abbrs = set(re.findall(r"\b[A-Z]{2}\b", label))
+                city_only = re.sub(r"\b[A-Z]{2}\b", " ", label)
+                idx.append({"label": label, "abbrs": abbrs, "city_norm": _norm_dma_text(city_only)})
+        _dma_index_cache = idx
+    return _dma_index_cache
+
+
+def _find_dma_label(conn, city_query, state_abbrs):
+    city_q = _norm_dma_text(city_query)
+    if not city_q:
+        return None
+    state_set = {a.strip().upper() for a in state_abbrs if a.strip()}
+    best, best_score = None, -1
+    for entry in _dma_index(conn):
+        if city_q in entry["city_norm"] or entry["city_norm"] in city_q:
+            score = len(entry["abbrs"] & state_set)
+            if score > best_score:
+                best, best_score = entry["label"], score
+    return best
+
+
+def query_dma(conn, city, state_abbrs):
+    label = _find_dma_label(conn, city, state_abbrs)
+    if not label:
+        return None
+    rows = conn.execute(
+        "SELECT county_name, state_abbr FROM dma_counties WHERE dma_label=?", (label,)
+    ).fetchall()
+    features = []
+    if rows and has_table(conn, "counties"):
+        parts, params = [], []
+        for r in rows:
+            parts.append("(name=? COLLATE NOCASE AND state_abbr=? COLLATE NOCASE)")
+            params.extend([r["county_name"], r["state_abbr"]])
+        crows = conn.execute(
+            "SELECT fips,namelsad,state_abbr,geometry FROM counties WHERE " + " OR ".join(parts),
+            params
+        ).fetchall()
+        for c in crows:
+            features.append(_feat("dma", c["fips"], f"{label} DMA", c["geometry"]))
+    return {"label": label, "fc": _fc(features)}
+
+
+def query_dma_batch(items):
+    """items=[{city, states:[...]}, ...] → dict "city|ST,ST" → {label, fc}."""
+    if not items:
+        return {}
+    conn = get_conn()
+    if not has_table(conn, "dma_counties"):
+        conn.close()
+        return {}
+    result = {}
+    for item in items:
+        city = str(item.get("city", "")).strip()
+        states = item.get("states", [])
+        if not isinstance(states, list):
+            states = [states]
+        key = f"{city.lower()}|{','.join(sorted(s.upper() for s in states if s))}"
+        if key in result or not city:
+            continue
+        r = query_dma(conn, city, states)
+        if r:
+            result[key] = r
+    conn.close()
+    return result
 
 
 # ── Spatial helpers ───────────────────────────────────────────────────────────
@@ -132,9 +239,18 @@ def search_region(q):
 
     # ── US counties ───────────────────────────────────────────────────────────
     if has_table(conn, "counties") and not features:
-        m = re.match(r"^(.+?)\s+county,?\s*([A-Za-z]{2})?$", q, re.IGNORECASE)
+        m = re.match(r"^(.+?)\s+(?:county|parish|borough),?\s*([A-Za-z]{2,})?$", q, re.IGNORECASE)
         if m:
-            cname, st = m.group(1).strip(), (m.group(2) or "").upper()
+            cname, st_raw = m.group(1).strip(), (m.group(2) or "").strip()
+            if len(st_raw) > 2:
+                # Full state name — look up 2-letter abbreviation from admin1
+                abbr_row = conn.execute(
+                    "SELECT iso FROM admin1 WHERE name=? COLLATE NOCASE "
+                    "AND country='United States of America'", (st_raw,)
+                ).fetchone() if has_table(conn, "admin1") else None
+                st = abbr_row["iso"].split("-")[1] if abbr_row else ""
+            else:
+                st = st_raw.upper()
             if st:
                 rows = conn.execute(
                     "SELECT fips,namelsad,state_abbr,geometry FROM counties "
@@ -192,6 +308,131 @@ def get_zip_context(zip_code):
     return result
 
 
+def _patch_county_state_abbr(conn):
+    """One-time fix: setup.py imported STUSAB (wrong field) instead of STUSPS,
+    leaving state_abbr empty for all counties. Populate it from state_fips."""
+    if not has_table(conn, "counties"):
+        return
+    empty = conn.execute(
+        "SELECT COUNT(*) FROM counties WHERE state_abbr='' OR state_abbr IS NULL"
+    ).fetchone()[0]
+    if empty == 0:
+        return
+    print(f"  🔧 Патч counties.state_abbr ({empty} строк)…", flush=True)
+    for fips, abbr in _STATE_FIPS_TO_ABBR.items():
+        conn.execute(
+            "UPDATE counties SET state_abbr=? "
+            "WHERE state_fips=? AND (state_abbr='' OR state_abbr IS NULL)",
+            (abbr, fips)
+        )
+    conn.commit()
+    print("  ✓ state_abbr исправлен", flush=True)
+
+
+def query_counties_batch(items):
+    """Batch county lookup: items=[{name, state}, ...] → dict "name:state" → feature."""
+    if not items:
+        return {}
+    conn = get_conn()
+    if not has_table(conn, "counties"):
+        conn.close()
+        return {}
+    result = {}
+    CHUNK = 200  # stay within SQLite expression depth limits
+    for offset in range(0, len(items), CHUNK):
+        chunk = items[offset:offset + CHUNK]
+        parts, params = [], []
+        for item in chunk:
+            name  = item.get("name", "")
+            state = item.get("state", "").upper()
+            if state:
+                parts.append("(name=? COLLATE NOCASE AND state_abbr=? COLLATE NOCASE)")
+                params.extend([name, state])
+            else:
+                parts.append("(name=? COLLATE NOCASE)")
+                params.append(name)
+        rows = conn.execute(
+            "SELECT fips,name,namelsad,state_abbr,geometry FROM counties WHERE " + " OR ".join(parts),
+            params
+        ).fetchall()
+        for r in rows:
+            n = r["name"].lower()
+            s = r["state_abbr"].lower()
+            feat = _feat("county", r["fips"], f"{r['namelsad']}, {r['state_abbr']}", r["geometry"])
+            result.setdefault(f"{n}:{s}", feat)
+            result.setdefault(f"{n}:", feat)
+    conn.close()
+    return result
+
+
+def query_cd_batch(items):
+    """items=[{state_fips:"13", cd_fp:"02"}, ...] → dict "state_fips:cd_fp" → feature."""
+    if not items:
+        return {}
+    conn = get_conn()
+    if not has_table(conn, "congressional_districts"):
+        conn.close()
+        return {}
+    result = {}
+    CHUNK = 200
+    for offset in range(0, len(items), CHUNK):
+        chunk = items[offset:offset + CHUNK]
+        parts, params = [], []
+        for item in chunk:
+            sfips = str(item.get("state_fips", "")).zfill(2)
+            cdfp  = str(item.get("cd_fp", "")).zfill(2)
+            parts.append("(state_fips=? AND cd_fp=?)")
+            params.extend([sfips, cdfp])
+        rows = conn.execute(
+            "SELECT state_fips,cd_fp,namelsad,geometry FROM congressional_districts WHERE "
+            + " OR ".join(parts), params
+        ).fetchall()
+        for r in rows:
+            key  = f"{r['state_fips']}:{r['cd_fp']}"
+            feat = _feat("congressional_district", key, r["namelsad"], r["geometry"])
+            result[key] = feat
+    conn.close()
+    return result
+
+
+def area_at(lat, lon):
+    """Return county + state at given lat/lon for the Show All Areas hover feature."""
+    conn = get_conn()
+    px, py = float(lon), float(lat)
+    result = {}
+
+    if has_table(conn, "counties"):
+        candidates = conn.execute(
+            "SELECT fips,name,namelsad,state_fips,state_abbr,geometry FROM counties "
+            "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=?",
+            (px, px, py, py)
+        ).fetchall()
+        for c in candidates:
+            geom = json.loads(c["geometry"])
+            if point_in_geom(px, py, geom):
+                abbr = c["state_abbr"] or _STATE_FIPS_TO_ABBR.get(c["state_fips"], "")
+                result = {
+                    "county_fips":  c["fips"],
+                    "county_name":  c["namelsad"],
+                    "county_short": c["name"],
+                    "state_fips":   c["state_fips"],
+                    "state_abbr":   abbr,
+                    "county_geom":  geom,
+                }
+                break
+
+    if result.get("state_abbr") and has_table(conn, "admin1"):
+        row = conn.execute(
+            "SELECT name FROM admin1 WHERE iso=? AND country='United States of America'",
+            (f"US-{result['state_abbr']}",)
+        ).fetchone()
+        if row:
+            result["state_name"] = row["name"]
+
+    conn.close()
+    return result or None
+
+
 def _feat(rtype, rid, name, geom_json):
     return {
         "type": "Feature",
@@ -235,18 +476,30 @@ class Handler(BaseHTTPRequestHandler):
             if not ctx:
                 return self._err(404, "Not found")
             self._ok(ctx)
+        elif parsed.path == "/api/area-at":
+            try:
+                lat = float(params.get("lat", [None])[0])
+                lon = float(params.get("lon", [None])[0])
+            except (TypeError, ValueError):
+                return self._err(400, "lat and lon required")
+            data = area_at(lat, lon)
+            self._ok(data if data else {})
         elif parsed.path == "/api/status":
             conn = get_conn()
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             info = {
-                "has_zcta":      "zcta"      in tables,
-                "has_states":    "states"    in tables,
-                "has_counties":  "counties"  in tables,
-                "has_countries": "countries" in tables,
-                "has_admin1":    "admin1"    in tables,
+                "has_zcta":      "zcta"                    in tables,
+                "has_states":    "states"                  in tables,
+                "has_counties":  "counties"                in tables,
+                "has_countries": "countries"               in tables,
+                "has_admin1":    "admin1"                  in tables,
+                "has_cd":        "congressional_districts" in tables,
+                "has_dma":       "dma_counties"             in tables,
             }
             if info["has_zcta"]:
                 info["zip_count"] = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]
+            if info["has_cd"]:
+                info["cd_count"] = conn.execute("SELECT COUNT(*) FROM congressional_districts").fetchone()[0]
             conn.close()
             self._ok(info)
         else:
@@ -274,6 +527,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/api/counties-batch", "/api/cd-batch", "/api/dma-batch"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                items = json.loads(body)
+                if not isinstance(items, list):
+                    return self._err(400, "Expected JSON array")
+                if parsed.path == "/api/cd-batch":
+                    self._ok(query_cd_batch(items))
+                elif parsed.path == "/api/dma-batch":
+                    self._ok(query_dma_batch(items))
+                else:
+                    self._ok(query_counties_batch(items))
+            except Exception as e:
+                self._err(400, str(e))
+        else:
+            self.send_error(404)
+
     def log_message(self, fmt, *args):
         if args and len(args) > 1 and str(args[1]) >= "400":
             print(f"  [{args[1]}] {args[0]}", file=sys.stderr)
@@ -288,15 +561,21 @@ if __name__ == "__main__":
         sys.exit(1)
 
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    n_zip  = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]      if "zcta"      in tables else 0
-    n_cty  = conn.execute("SELECT COUNT(*) FROM countries").fetchone()[0] if "countries" in tables else 0
-    n_adm  = conn.execute("SELECT COUNT(*) FROM admin1").fetchone()[0]    if "admin1"    in tables else 0
-    n_co   = conn.execute("SELECT COUNT(*) FROM counties").fetchone()[0]  if "counties"  in tables else 0
+    # Pre-populate has_table cache so request handlers skip sqlite_master queries
+    _has_table_cache.update({t: True for t in tables})
+    _patch_county_state_abbr(conn)
+    n_zip  = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]                        if "zcta"                    in tables else 0
+    n_cty  = conn.execute("SELECT COUNT(*) FROM countries").fetchone()[0]                  if "countries"               in tables else 0
+    n_adm  = conn.execute("SELECT COUNT(*) FROM admin1").fetchone()[0]                     if "admin1"                  in tables else 0
+    n_co   = conn.execute("SELECT COUNT(*) FROM counties").fetchone()[0]                   if "counties"                in tables else 0
+    n_cd   = conn.execute("SELECT COUNT(*) FROM congressional_districts").fetchone()[0]    if "congressional_districts" in tables else 0
+    n_dma  = conn.execute("SELECT COUNT(DISTINCT dma_label) FROM dma_counties").fetchone()[0] if "dma_counties"             in tables else 0
     conn.close()
 
     mb = os.path.getsize(DB_PATH) / 1024 / 1024
-    print(f"✅ База: {n_zip} ZIP  |  {n_cty} стран  |  {n_adm} регионов  |  {n_co} округов  ({mb:.0f} MB)")
+    print(f"✅ База: {n_zip} ZIP  |  {n_cty} стран  |  {n_adm} регионов  |  {n_co} окр.  |  {n_cd} округов Конгресса  |  {n_dma} DMA  ({mb:.0f} MB)")
     print(f"🗺  ZIP Code Map → http://localhost:{PORT}  |  Ctrl+C — стоп\n")
     Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
-    HTTPServer(("localhost", PORT), Handler).serve_forever()
+    ThreadingHTTPServer(("localhost", PORT), Handler).serve_forever()
