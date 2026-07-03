@@ -1358,11 +1358,28 @@ function classifyExcLine(raw) {
     return { raw, type:'dma', name, states, display, key:`dma:${name.toLowerCase()}:${states}` };
   }
 
+  // ── Nielsen DMA®, alternate short format with no "(Nielsen DMA®)" suffix
+  // (e.g. copy-pasted from Google Ads location targeting), such as:
+  // "Providence-New Bedford MA, United States"
+  // "Harrisburg-Lancaster-Lebanon-York PA, United States"
+  // Requires a hyphen in the name (real single-city places rarely have one)
+  // so plain "City ST, United States" entries still fall through to the
+  // generic place search below instead of being misread as a DMA.
+  const dmaM2 = line.match(/^(.+?)\s+([A-Z]{2}(?:-[A-Z]{2})*)\s*,\s*United States\s*$/);
+  if (dmaM2 && dmaM2[1].includes('-') && dmaM2[2].split('-').every(s => US_STATE_ABBRS.has(s))) {
+    const name = dmaM2[1].trim();
+    const states = dmaM2[2].toUpperCase();
+    const display = `${name}, ${states} (DMA)`;
+    return { raw, type:'dma', name, states, display, key:`dma:${name.toLowerCase()}:${states}` };
+  }
+
   // Strip trailing type annotations: "(city)", "(county)", "(state/province)", etc.
   // Uses letter-only pattern — does NOT strip coordinate strings like "(32.8,-116.7)"
   line = line.replace(/\s*\([a-zA-Z\/\s-]{3,}\)\s*$/, '').trim();
 
   // Strip trailing country qualifiers
+  const hadUSQualifier = /,?\s*(united states of america|united states|u\.s\.a?\.|usa)\s*$/i.test(line);
+  const beforeCountryStrip = line;
   line = line
     .replace(/,?\s*(united states of america|united states|u\.s\.a?\.)\s*$/i, '')
     .replace(/,?\s*\busa\b\s*$/i, '')
@@ -1370,6 +1387,10 @@ function classifyExcLine(raw) {
     .replace(/,\s*United\s*$/i, '')   // truncated ", United" at end
     .replace(/,\s*$/, '')
     .trim();
+  // A bare country name ("Canada", "United States") has nothing before the
+  // qualifier, so stripping it leaves nothing — restore the original text
+  // so the line still resolves as a country instead of vanishing silently.
+  if (!line) line = beforeCountryStrip;
   if (!line) return null;
 
   const parts = line.split(/\s*,\s*/);
@@ -1384,6 +1405,14 @@ function classifyExcLine(raw) {
   if (parts.length === 1 && /^[A-Z]{2}$/i.test(first) && US_STATE_ABBRS.has(first.toUpperCase())) {
     return { raw, type:'state', name:first.toUpperCase(), display:first,
              key:`state:${first.toLowerCase()}` };
+  }
+
+  // ── Full US state name explicitly qualified as United States, e.g.
+  // "Georgia, United States" — disambiguates from same-named countries
+  // (Georgia the country, near Turkey) which would otherwise win the lookup.
+  if (parts.length === 1 && hadUSQualifier && US_STATE_NAMES.has(first.toLowerCase())) {
+    const abbr = US_STATE_NAME_TO_ABBR[first.toLowerCase()];
+    return { raw, type:'state', name:abbr, display:first, key:`state:${abbr.toLowerCase()}` };
   }
 
   // ── Congressional district: "Georgia's 2nd Congressional District …" ──
@@ -1422,7 +1451,14 @@ function classifyExcLine(raw) {
 
   // ── Everything else: country, province, state by full name, city ──
   // searchLocal() will find these in countries/admin1 tables
-  return { raw, type:'place', query:line, display:first || line,
+  // Collapse consecutive duplicate comma-separated segments, e.g.
+  // "Istanbul, Istanbul, Turkiye" → "Istanbul, Turkiye" — common when a
+  // city shares its name with its containing province/state. Nominatim's
+  // structured search otherwise treats the redundant repeat as a stricter
+  // filter and returns only a point marker instead of the area boundary.
+  const dedupedParts = parts.filter((p, i) => i === 0 || p.toLowerCase() !== parts[i - 1].toLowerCase());
+  const query = dedupedParts.join(', ');
+  return { raw, type:'place', query, display:first || line,
            key:`place:${line.toLowerCase()}` };
 }
 
@@ -1433,10 +1469,18 @@ function hasPolygon(fc) {
 }
 
 async function nomSearch(query, opts = {}) {
-  const p = new URLSearchParams({ q:query, format:'geojson', polygon_geojson:'1', limit:'1' });
+  // Ask for a few candidates, not just the top hit — Nominatim often ranks
+  // a bare point marker (a city's "node") above the actual administrative
+  // boundary ("relation") for the same place, so limit:1 can silently
+  // return a point when a usable polygon was available lower in the list.
+  const p = new URLSearchParams({ q:query, format:'geojson', polygon_geojson:'1', limit:'5' });
   if (opts.countrycodes) p.set('countrycodes', opts.countrycodes);
   if (opts.featuretype)  p.set('featuretype',  opts.featuretype);
-  return nominatim(`/search?${p}`);
+  const fc = await nominatim(`/search?${p}`);
+  const poly = fc?.features?.find(f =>
+    f?.geometry?.type === 'Polygon' || f?.geometry?.type === 'MultiPolygon');
+  if (poly) return { type: 'FeatureCollection', features: [poly] };
+  return fc?.features?.length ? { type: 'FeatureCollection', features: [fc.features[0]] } : fc;
 }
 
 // Geocode a place name → [lng, lat].

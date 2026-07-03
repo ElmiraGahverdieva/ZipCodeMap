@@ -181,6 +181,20 @@ def query_zips(zips):
     } for r in rows])
 
 
+def _us_state_abbr(conn, st_raw):
+    """2-letter abbreviation passthrough, or look up a full US state name via admin1."""
+    st_raw = st_raw.strip()
+    if len(st_raw) == 2:
+        return st_raw.upper()
+    if not st_raw or not has_table(conn, "admin1"):
+        return ""
+    row = conn.execute(
+        "SELECT iso FROM admin1 WHERE name=? COLLATE NOCASE "
+        "AND country='United States of America'", (st_raw,)
+    ).fetchone()
+    return row["iso"].split("-")[1] if row else ""
+
+
 def search_region(q):
     q = q.strip()
     conn = get_conn()
@@ -193,6 +207,23 @@ def search_region(q):
             features.append(_feat("zip", r["zip"], f"ZIP {r['zip']}", r["geometry"]))
         conn.close()
         return _fc(features)
+
+    # ── 2-letter US state abbreviation — resolve via admin1 ISO code first ─────
+    # Half of all US state abbreviations collide with an ISO-3166-1 alpha-2
+    # country code (GA→Gabon, PA→Panama, IN→India, DE→Germany, ...). The
+    # frontend already commits to treating a bare 2-letter code as a US state
+    # when it's a known state abbreviation, so resolve it unambiguously here
+    # before the generic country/admin1 name search below can pick the wrong one.
+    if re.match(r"^[A-Za-z]{2}$", q) and has_table(conn, "admin1"):
+        rows = conn.execute(
+            "SELECT id, name, country, geometry FROM admin1 WHERE iso=?",
+            (f"US-{q.upper()}",)
+        ).fetchall()
+        for r in rows:
+            features.append(_feat("state", r["id"], r["name"], r["geometry"]))
+        if features:
+            conn.close()
+            return _fc(features)
 
     # Normalize query for accent-insensitive search
     q_norm = normalize(q)
@@ -242,15 +273,7 @@ def search_region(q):
         m = re.match(r"^(.+?)\s+(?:county|parish|borough),?\s*([A-Za-z]{2,})?$", q, re.IGNORECASE)
         if m:
             cname, st_raw = m.group(1).strip(), (m.group(2) or "").strip()
-            if len(st_raw) > 2:
-                # Full state name — look up 2-letter abbreviation from admin1
-                abbr_row = conn.execute(
-                    "SELECT iso FROM admin1 WHERE name=? COLLATE NOCASE "
-                    "AND country='United States of America'", (st_raw,)
-                ).fetchone() if has_table(conn, "admin1") else None
-                st = abbr_row["iso"].split("-")[1] if abbr_row else ""
-            else:
-                st = st_raw.upper()
+            st = _us_state_abbr(conn, st_raw)
             if st:
                 rows = conn.execute(
                     "SELECT fips,namelsad,state_abbr,geometry FROM counties "
@@ -268,6 +291,50 @@ def search_region(q):
             ).fetchall()
         for r in rows:
             features.append(_feat("county", r["fips"], f"{r['namelsad']}, {r['state_abbr']}", r["geometry"]))
+
+    # ── US county subdivisions (townships, precincts, New England towns) ──────
+    # Two shapes: an explicit "X Township/Precinct, State" (mirrors the county
+    # branch above), and a bare "Name, State" fallback — many townships are
+    # pasted without a suffix keyword at all (e.g. "Peach Bottom, Pennsylvania"),
+    # so this is tried last, only once nothing more specific has matched.
+    if has_table(conn, "cousub") and not features:
+        m = re.match(r"^(.+?)\s+(?:township|precinct),?\s*([A-Za-z]{2,})?$", q, re.IGNORECASE)
+        if m:
+            cname, st_raw = m.group(1).strip(), (m.group(2) or "").strip()
+            st = _us_state_abbr(conn, st_raw)
+            if st:
+                rows = conn.execute(
+                    "SELECT fips,namelsad,state_abbr,geometry FROM cousub "
+                    "WHERE name=? COLLATE NOCASE AND state_abbr=? COLLATE NOCASE", (cname, st)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT fips,namelsad,state_abbr,geometry FROM cousub "
+                    "WHERE name=? COLLATE NOCASE LIMIT 10", (cname,)
+                ).fetchall()
+        else:
+            # Bare "Name, State" — no "Township"/"Precinct" keyword to signal
+            # intent, so only accept it when the name is unambiguous within
+            # the state. Township/precinct names repeat heavily within a
+            # state (e.g. Indiana alone has 17 different "Franklin"
+            # townships; MS/LA number some precincts "1".."82") — with no
+            # county given there is no way to pick the right one, so
+            # returning all of them would silently spam the map with
+            # townships nobody asked for. Ambiguous → fall through to
+            # Nominatim/place resolution instead of guessing.
+            bare = [p.strip() for p in q.split(",")]
+            rows = []
+            if len(bare) == 2:
+                st = _us_state_abbr(conn, bare[1])
+                if st:
+                    candidates = conn.execute(
+                        "SELECT fips,namelsad,state_abbr,geometry FROM cousub "
+                        "WHERE name=? COLLATE NOCASE AND state_abbr=? COLLATE NOCASE", (bare[0], st)
+                    ).fetchall()
+                    if len(candidates) == 1:
+                        rows = candidates
+        for r in rows:
+            features.append(_feat("cousub", r["fips"], f"{r['namelsad']}, {r['state_abbr']}", r["geometry"]))
 
     conn.close()
     return _fc(features)
@@ -495,6 +562,7 @@ class Handler(BaseHTTPRequestHandler):
                 "has_admin1":    "admin1"                  in tables,
                 "has_cd":        "congressional_districts" in tables,
                 "has_dma":       "dma_counties"             in tables,
+                "has_cousub":    "cousub"                   in tables,
             }
             if info["has_zcta"]:
                 info["zip_count"] = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]
@@ -572,10 +640,11 @@ if __name__ == "__main__":
     n_co   = conn.execute("SELECT COUNT(*) FROM counties").fetchone()[0]                   if "counties"                in tables else 0
     n_cd   = conn.execute("SELECT COUNT(*) FROM congressional_districts").fetchone()[0]    if "congressional_districts" in tables else 0
     n_dma  = conn.execute("SELECT COUNT(DISTINCT dma_label) FROM dma_counties").fetchone()[0] if "dma_counties"             in tables else 0
+    n_cs   = conn.execute("SELECT COUNT(*) FROM cousub").fetchone()[0]                     if "cousub"                  in tables else 0
     conn.close()
 
     mb = os.path.getsize(DB_PATH) / 1024 / 1024
-    print(f"✅ База: {n_zip} ZIP  |  {n_cty} стран  |  {n_adm} регионов  |  {n_co} окр.  |  {n_cd} округов Конгресса  |  {n_dma} DMA  ({mb:.0f} MB)")
+    print(f"✅ База: {n_zip} ZIP  |  {n_cty} стран  |  {n_adm} регионов  |  {n_co} окр.  |  {n_cd} округов Конгресса  |  {n_dma} DMA  |  {n_cs} подразделений округов  ({mb:.0f} MB)")
     print(f"🗺  ZIP Code Map → http://localhost:{PORT}  |  Ctrl+C — стоп\n")
     Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
     ThreadingHTTPServer(("localhost", PORT), Handler).serve_forever()

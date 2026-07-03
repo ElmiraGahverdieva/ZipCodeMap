@@ -5,6 +5,7 @@ Run once; then use start.sh every time.
   python3 setup.py                         # auto-download everything
   python3 setup.py --file cb_...zip        # supply ZCTA zip manually
   python3 setup.py --rebuild               # force full rebuild
+  python3 setup.py --cousub                # add county subdivisions (townships/precincts)
 """
 import csv
 import json
@@ -39,6 +40,21 @@ ZCTA_URLS = [
 # Natural Earth — hosted on AWS S3, no Cloudflare blocking
 NE_COUNTRIES_URL = "https://naturalearth.s3.amazonaws.com/50m_cultural/ne_50m_admin_0_countries.zip"
 NE_ADMIN1_URL    = "https://naturalearth.s3.amazonaws.com/50m_cultural/ne_50m_admin_1_states_provinces.zip"
+
+# County subdivisions (townships, precincts, boroughs-as-subdivision, New
+# England towns, ...) — unlike ZCTA/counties/states, Census only publishes
+# this layer one state at a time, so building it means 51 separate downloads.
+COUSUB_URL_TMPL = "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_{fips}_cousub_500k.zip"
+STATE_FIPS_TO_ABBR = {
+    '01':'AL','02':'AK','04':'AZ','05':'AR','06':'CA','08':'CO','09':'CT',
+    '10':'DE','11':'DC','12':'FL','13':'GA','15':'HI','16':'ID','17':'IL',
+    '18':'IN','19':'IA','20':'KS','21':'KY','22':'LA','23':'ME','24':'MD',
+    '25':'MA','26':'MI','27':'MN','28':'MS','29':'MO','30':'MT','31':'NE',
+    '32':'NV','33':'NH','34':'NJ','35':'NM','36':'NY','37':'NC','38':'ND',
+    '39':'OH','40':'OK','41':'OR','42':'PA','44':'RI','45':'SC','46':'SD',
+    '47':'TN','48':'TX','49':'UT','50':'VT','51':'VA','53':'WA','54':'WV',
+    '55':'WI','56':'WY',
+}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -297,6 +313,20 @@ def main():
 
     rebuild = "--rebuild" in sys.argv
 
+    if "--cousub" in sys.argv:
+        if not os.path.exists(DB_PATH):
+            print("❌ zcta.db не найдена. Сначала запустите: python3 setup.py")
+            return False
+        if not ensure_pyshp():
+            return False
+        print("Округа-подразделения (townships/precincts), 51 файл по штатам:\n")
+        conn = sqlite3.connect(DB_PATH)
+        build_cousub(conn)
+        conn.close()
+        db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
+        print(f"\n✅ Готово! База: {db_mb:.0f} MB → {DB_PATH}")
+        return True
+
     # If DB exists, check what's already there
     if os.path.exists(DB_PATH) and not rebuild:
         conn = sqlite3.connect(DB_PATH)
@@ -451,6 +481,85 @@ def _build_counties(zip_path, conn):
     conn.executemany("INSERT OR REPLACE INTO counties VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
     conn.commit()
     print(f"  ✓ Counties: {len(batch)}")
+
+
+def build_cousub(conn):
+    """County subdivisions (townships, precincts, boroughs-as-subdivision,
+    New England towns, Census County Divisions in states without legal
+    subdivisions). Census only publishes this one state at a time, so this
+    downloads 51 small files (50 states + DC) instead of one national file.
+    A failed/blocked state is skipped, not fatal — partial coverage is fine.
+    """
+    conn.execute("DROP TABLE IF EXISTS cousub")
+    conn.execute("""CREATE TABLE cousub (
+        fips TEXT PRIMARY KEY,
+        name TEXT, namelsad TEXT,
+        state_fips TEXT, state_abbr TEXT,
+        bbox_minx REAL, bbox_miny REAL, bbox_maxx REAL, bbox_maxy REAL,
+        geometry TEXT
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cousub_name  ON cousub(name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cousub_state ON cousub(state_abbr)")
+
+    ok, failed = 0, []
+    items = sorted(STATE_FIPS_TO_ABBR.items())
+    for i, (fips, abbr) in enumerate(items, 1):
+        print(f"  [{i}/{len(items)}] {abbr}...", end=" ", flush=True)
+        url = COUSUB_URL_TMPL.format(fips=fips)
+        p = download_quiet(url)
+        if not p:
+            print("❌")
+            failed.append(abbr)
+            continue
+        try:
+            fields, records = read_shapefile(p)
+            batch = []
+            for rec, geom in records:
+                sfips    = str(rec.get("STATEFP", fips)).strip()
+                cfips    = str(rec.get("COUSUBFP", "")).strip()
+                name     = str(rec.get("NAME", "")).strip()
+                namelsad = str(rec.get("NAMELSAD", name)).strip()
+                bx = get_bbox(geom)
+                batch.append((sfips + cfips, name, namelsad, sfips, abbr,
+                              bx[0], bx[1], bx[2], bx[3],
+                              json.dumps(geom, separators=(",", ":"))))
+            conn.executemany("INSERT OR REPLACE INTO cousub VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
+            conn.commit()
+            print(f"✓ {len(batch)}")
+            ok += 1
+        except Exception as e:
+            print(f"❌ ({e})")
+            failed.append(abbr)
+        finally:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+    n = conn.execute("SELECT COUNT(*) FROM cousub").fetchone()[0]
+    print(f"  ✓ County subdivisions: {n} ({ok}/{len(items)} штатов)")
+    if failed:
+        print(f"  ⚠️ Пропущены (блокировка/ошибка): {', '.join(failed)}")
+
+
+def download_quiet(url):
+    """Like download(), but without the progress bar — used for the 51
+    small per-state county-subdivision files where a bar per file is noise."""
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        tmp = tempfile.mktemp(suffix=".zip")
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            ct = resp.headers.get("Content-Type", "")
+            if "html" in ct.lower():
+                return None
+            data = resp.read()
+        if len(data) < 500:
+            return None
+        with open(tmp, "wb") as f:
+            f.write(data)
+        return tmp
+    except Exception:
+        return None
 
 
 def build_dma_counties(conn):
