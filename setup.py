@@ -6,6 +6,7 @@ Run once; then use start.sh every time.
   python3 setup.py --file cb_...zip        # supply ZCTA zip manually
   python3 setup.py --rebuild               # force full rebuild
   python3 setup.py --cousub                # add county subdivisions (townships/precincts)
+  python3 setup.py --cd                    # add congressional districts + admin1 bbox migration
 """
 import csv
 import json
@@ -21,6 +22,7 @@ import zipfile
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zcta.db")
 DMA_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nielsen_dma_counties.csv")
+ZIP_CROSSWALK_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zip_zcta_crosswalk.csv")
 
 HEADERS = {
     "User-Agent": (
@@ -45,6 +47,10 @@ NE_ADMIN1_URL    = "https://naturalearth.s3.amazonaws.com/50m_cultural/ne_50m_ad
 # England towns, ...) — unlike ZCTA/counties/states, Census only publishes
 # this layer one state at a time, so building it means 51 separate downloads.
 COUSUB_URL_TMPL = "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_{fips}_cousub_500k.zip"
+
+# Congressional districts (116th Congress) — single national file, no
+# per-state downloads needed (unlike county subdivisions above).
+CD_URL = "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_cd116_500k.zip"
 STATE_FIPS_TO_ABBR = {
     '01':'AL','02':'AK','04':'AZ','05':'AR','06':'CA','08':'CO','09':'CT',
     '10':'DE','11':'DC','12':'FL','13':'GA','15':'HI','16':'ID','17':'IL',
@@ -197,6 +203,7 @@ def build_zcta(zip_path, conn):
         geometry TEXT
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_zcta_zip ON zcta(zip)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_zcta_bbox ON zcta(bbox_minx, bbox_maxx, bbox_miny, bbox_maxy)")
 
     batch = []
     for i, (rec, geom) in enumerate(records, 1):
@@ -327,6 +334,21 @@ def main():
         print(f"\n✅ Готово! База: {db_mb:.0f} MB → {DB_PATH}")
         return True
 
+    if "--cd" in sys.argv:
+        if not os.path.exists(DB_PATH):
+            print("❌ zcta.db не найдена. Сначала запустите: python3 setup.py")
+            return False
+        if not ensure_pyshp():
+            return False
+        print("Округа Конгресса (единый национальный файл):\n")
+        conn = sqlite3.connect(DB_PATH)
+        _download_and_build("CD", CD_URL, build_congressional_districts, conn)
+        migrate_admin1_bbox(conn)
+        conn.close()
+        db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
+        print(f"\n✅ Готово! База: {db_mb:.0f} MB → {DB_PATH}")
+        return True
+
     # If DB exists, check what's already there
     if os.path.exists(DB_PATH) and not rebuild:
         conn = sqlite3.connect(DB_PATH)
@@ -336,9 +358,12 @@ def main():
         n_countries = table_count(conn, "countries")
         n_admin1    = table_count(conn, "admin1")
         n_dma       = table_count(conn, "dma_counties")
+        n_zxwalk    = table_count(conn, "zip_crosswalk")
+        admin1_has_bbox = "bbox_minx" in {r[1] for r in conn.execute("PRAGMA table_info(admin1)").fetchall()}
         conn.close()
 
-        if n_zcta > 0 and n_countries > 0 and n_admin1 > 0 and n_dma > 0 and not manual_zcta:
+        if (n_zcta > 0 and n_countries > 0 and n_admin1 > 0 and n_dma > 0 and n_zxwalk > 0
+                and admin1_has_bbox and not manual_zcta):
             print(f"✅ База уже полная: {n_zcta} ZIP · {n_countries} стран · {n_admin1} регионов · {n_dma} DMA-записей")
             print("   Для пересоздания: python3 setup.py --rebuild")
             return True
@@ -356,6 +381,11 @@ def main():
             if n_dma == 0:
                 print("  Nielsen DMA (рынки телевещания):")
                 build_dma_counties(conn)
+            if n_zxwalk == 0:
+                print("  ZIP→ZCTA crosswalk (заполнение пробелов):")
+                build_zip_crosswalk(conn)
+            if not admin1_has_bbox and table_count(conn, "admin1") > 0:
+                migrate_admin1_bbox(conn)
             conn.close()
             db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
             print(f"\n✅ Готово! База: {db_mb:.0f} MB → {DB_PATH}")
@@ -372,7 +402,7 @@ def main():
     conn = sqlite3.connect(DB_PATH)
 
     # 1. ZCTA (US ZIP codes)
-    print("1/5 ZIP-коды (ZCTA):")
+    print("1/6 ZIP-коды (ZCTA):")
     zcta_zip = None
     if manual_zcta:
         if os.path.exists(manual_zcta):
@@ -401,15 +431,15 @@ def main():
                 pass
 
     # 2. Countries (Natural Earth — S3, no blocking)
-    print("2/5 Страны мира (Natural Earth):")
-    _download_and_build("2/5", NE_COUNTRIES_URL, build_countries, conn)
+    print("2/6 Страны мира (Natural Earth):")
+    _download_and_build("2/6", NE_COUNTRIES_URL, build_countries, conn)
 
     # 3. Admin1 worldwide states/provinces (Natural Earth)
-    print("3/5 Регионы/провинции мира (Natural Earth):")
-    _download_and_build("3/5", NE_ADMIN1_URL, build_admin1, conn)
+    print("3/6 Регионы/провинции мира (Natural Earth):")
+    _download_and_build("3/6", NE_ADMIN1_URL, build_admin1, conn)
 
     # 4. US counties (Census — may be blocked)
-    print("4/5 Округа США (Census Bureau):")
+    print("4/6 Округа США (Census Bureau):")
     county_urls = [
         "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_county_500k.zip",
         "https://www2.census.gov/geo/tiger/GENZ2019/shp/cb_2019_us_county_500k.zip",
@@ -431,8 +461,12 @@ def main():
         print("  ⚠️ Округа пропущены (Census заблокирован — ок, данные стран/штатов есть)")
 
     # 5. Nielsen DMA® (TV media markets) — bundled crosswalk, no download
-    print("5/5 Nielsen DMA (рынки телевещания):")
+    print("5/6 Nielsen DMA (рынки телевещания):")
     build_dma_counties(conn)
+
+    # 6. ZIP→ZCTA crosswalk — bundled, fills gaps for ZIPs without their own ZCTA
+    print("6/6 ZIP→ZCTA crosswalk (заполнение пробелов):")
+    build_zip_crosswalk(conn)
 
     conn.close()
     db_mb = os.path.getsize(DB_PATH) / 1024 / 1024
@@ -466,6 +500,7 @@ def _build_counties(zip_path, conn):
         geometry TEXT
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_name  ON counties(name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_bbox ON counties(bbox_minx, bbox_maxx, bbox_miny, bbox_maxy)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_counties_state ON counties(state_abbr)")
     batch = []
     for rec, geom in records:
@@ -481,6 +516,61 @@ def _build_counties(zip_path, conn):
     conn.executemany("INSERT OR REPLACE INTO counties VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
     conn.commit()
     print(f"  ✓ Counties: {len(batch)}")
+
+
+def build_congressional_districts(zip_path, conn):
+    """Congressional districts (116th Congress) → congressional_districts
+    table. Single national file, same shape as counties (bbox columns for
+    fast point-in-polygon pre-filtering during map-hover lookups)."""
+    print("  Читаю congressional districts shapefile...")
+    fields, records = read_shapefile(zip_path)
+    conn.execute("DROP TABLE IF EXISTS congressional_districts")
+    conn.execute("""CREATE TABLE congressional_districts (
+        state_fips TEXT, cd_fp TEXT, namelsad TEXT,
+        bbox_minx REAL, bbox_miny REAL, bbox_maxx REAL, bbox_maxy REAL,
+        geometry TEXT,
+        PRIMARY KEY (state_fips, cd_fp)
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cd_state ON congressional_districts(state_fips)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cd_bbox ON congressional_districts(bbox_minx, bbox_maxx, bbox_miny, bbox_maxy)")
+    batch = []
+    for rec, geom in records:
+        sfips    = str(rec.get("STATEFP", "")).strip()
+        cdfp     = str(rec.get("CD116FP", "")).strip()
+        namelsad = str(rec.get("NAMELSAD", "")).strip()
+        bx = get_bbox(geom)
+        batch.append((sfips, cdfp, namelsad, bx[0], bx[1], bx[2], bx[3],
+                      json.dumps(geom, separators=(",", ":"))))
+    conn.executemany("INSERT OR REPLACE INTO congressional_districts VALUES (?,?,?,?,?,?,?,?)", batch)
+    conn.commit()
+    print(f"  ✓ Congressional districts: {len(batch)}")
+
+
+def migrate_admin1_bbox(conn):
+    """Add bbox columns to admin1 (world provinces/US states, Natural Earth)
+    and backfill them, so province-level map hover can use the same fast
+    bbox pre-filter as counties/zcta/cousub instead of scanning every
+    polygon on the planet per mousemove."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(admin1)").fetchall()}
+    if "bbox_minx" in cols:
+        return
+    print("  Добавляю bbox-колонки в admin1...")
+    conn.execute("ALTER TABLE admin1 ADD COLUMN bbox_minx REAL")
+    conn.execute("ALTER TABLE admin1 ADD COLUMN bbox_miny REAL")
+    conn.execute("ALTER TABLE admin1 ADD COLUMN bbox_maxx REAL")
+    conn.execute("ALTER TABLE admin1 ADD COLUMN bbox_maxy REAL")
+    rows = conn.execute("SELECT id, geometry FROM admin1").fetchall()
+    batch = []
+    for rid, geom_json in rows:
+        bx = get_bbox(json.loads(geom_json))
+        batch.append((bx[0], bx[1], bx[2], bx[3], rid))
+    conn.executemany(
+        "UPDATE admin1 SET bbox_minx=?, bbox_miny=?, bbox_maxx=?, bbox_maxy=? WHERE id=?",
+        batch
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_admin1_bbox ON admin1(bbox_minx, bbox_maxx, bbox_miny, bbox_maxy)")
+    conn.commit()
+    print(f"  ✓ admin1: bbox добавлен ({len(batch)} регионов)")
 
 
 def build_cousub(conn):
@@ -499,6 +589,7 @@ def build_cousub(conn):
         geometry TEXT
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cousub_name  ON cousub(name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cousub_bbox ON cousub(bbox_minx, bbox_maxx, bbox_miny, bbox_maxy)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_cousub_state ON cousub(state_abbr)")
 
     ok, failed = 0, []
@@ -560,6 +651,39 @@ def download_quiet(url):
         return tmp
     except Exception:
         return None
+
+
+def build_zip_crosswalk(conn):
+    """HRSA GeoCare Navigator ZIP-to-ZCTA crosswalk (successor to the UDS
+    Mapper crosswalk), bundled in the repo (no download needed). ~41k USPS
+    ZIP codes vs. ~33.8k that actually have their own ZCTA polygon — the
+    remaining ~7k (PO boxes, unique-recipient, sparse/rural ZIPs) are mapped
+    here to the nearest ZCTA that DOES have a polygon, so a ZIP lookup that
+    misses the zcta table can still render an approximate boundary instead
+    of coming back empty.
+    """
+    if not os.path.exists(ZIP_CROSSWALK_CSV_PATH):
+        print("  ⚠️ zip_zcta_crosswalk.csv не найден — fallback для ZIP без своей ZCTA пропущен")
+        return
+    with open(ZIP_CROSSWALK_CSV_PATH, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    conn.execute("DROP TABLE IF EXISTS zip_crosswalk")
+    conn.execute("""CREATE TABLE zip_crosswalk (
+        zip TEXT PRIMARY KEY, zcta TEXT, po_name TEXT, state TEXT
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_zip_crosswalk_zcta ON zip_crosswalk(zcta)")
+
+    batch = []
+    for row in rows:
+        zip_ = row["ZIP_CODE"].strip().zfill(5)
+        zcta = (row.get("zcta") or "").strip()
+        if not zcta:
+            continue  # a handful of territory ZIPs have no ZCTA at all — can't fall back
+        batch.append((zip_, zcta.zfill(5), row.get("PO_NAME", "").strip(), row.get("STATE", "").strip().upper()))
+    conn.executemany("INSERT OR REPLACE INTO zip_crosswalk VALUES (?,?,?,?)", batch)
+    conn.commit()
+    print(f"  ✓ ZIP→ZCTA crosswalk: {len(batch)} ZIP-кодов")
 
 
 def build_dma_counties(conn):

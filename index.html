@@ -107,6 +107,14 @@
     }
     .show-all-ctrl button:hover{background:#f8f9fa;border-color:#bdc1c6}
     .show-all-ctrl button.active{background:#e91e63;color:#fff;border-color:#e91e63;box-shadow:0 1px 6px rgba(233,30,99,.4)}
+    .show-all-ctrl .type-switch{display:flex;gap:4px;margin-top:6px}
+    .show-all-ctrl .type-btn{
+      background:#fff;border:1.5px solid #dadce0;border-radius:5px;
+      padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;
+      color:#5f6368;box-shadow:0 1px 3px rgba(0,0,0,.15);flex:1;transition:all .15s
+    }
+    .show-all-ctrl .type-btn:hover{background:#f8f9fa}
+    .show-all-ctrl .type-btn.active{background:#ff6d00;color:#fff;border-color:#ff6d00}
 
     /* ── Marked items panel ───────────────────────────────────── */
     .marked-item{display:flex;justify-content:space-between;align-items:baseline;
@@ -258,6 +266,8 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
 
 map.createPane('hoverPane');
 map.getPane('hoverPane').style.zIndex = 310; // under all feature layers (default overlay = 400)
+map.createPane('allAreasPane');
+map.getPane('allAreasPane').style.zIndex = 300; // under hoverPane — the light "all zones in view" backdrop
 const incLayer     = L.featureGroup().addTo(map);
 const excLayer     = L.featureGroup().addTo(map);
 const neuLayer     = L.featureGroup().addTo(map);
@@ -565,7 +575,7 @@ function buildIncLayer(fc){
     onEachFeature(feat,lyr){
       const p   = feat.properties;
       const zip = p.ZCTA5CE20 || p.zip;
-      const label = p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '');
+      const label = (p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '')) + (p.approx ? ' (прибл. граница)' : '');
       lyr.bindTooltip(label, {sticky:true,offset:[10,0]});
 
       lyr.on('mousemove', function(e){
@@ -679,10 +689,10 @@ async function loadZipCtx(zip, bounds){
 
 // ── Build excluded layer ──────────────────────────────────────────────────────
 function buildExcLayer(fc, key){
-  return L.geoJSON(fc,{
+  const lyrGroup = L.geoJSON(fc,{
     style:SE,
     onEachFeature(feat,lyr){
-      const name = feat.properties.display_name||key;
+      const name = (feat.properties.display_name||key) + (feat.properties.approx ? ' (прибл. граница)' : '');
       lyr.bindTooltip(name,{sticky:true,offset:[10,0],className:'rt'});
       lyr.on('mousemove', function(e){
         if (!window.turf) return;
@@ -722,79 +732,255 @@ function buildExcLayer(fc, key){
       });
     }
   });
+  return lyrGroup;
 }
 
 // ── Show All Areas — state & hover vars ──────────────────────────────────────
 let showAllMode   = false;
+let showAllType   = 'county';   // 'county' | 'zip' | 'cd' | 'province' — what hover/dblclick operate on
 let _hoverLyr     = null;
 let _hoverTimer   = null;
-const _areaCache  = new Map();    // "lat2:lon2" → server data
+const _areaCache  = new Map();    // "type:lat2:lon2" → server data
 const _pendingAreaData = new Map();
 let   _pendingAreaId   = 0;
+let   _currentShowAllTypes = ['county'];
+
+const TYPE_LABELS = { county:'Округа', zip:'ZIP', cd:'Конгресс. округа', province:'Провинции/штаты' };
+
+// Continental US bounding box — decides which granularities the Show All
+// Areas menu offers (US-specific layers like county/ZIP/CD vs. world
+// admin1 "provinces", which is the only layer that also covers non-US
+// areas — and even then only for the ~9 countries Natural Earth's 50m
+// admin1 tier includes).
+const US_BBOX = { minLon:-125, maxLon:-66, minLat:24, maxLat:50 };
+
+function _isViewportInUS() {
+  const c = map.getCenter();
+  return c.lng >= US_BBOX.minLon && c.lng <= US_BBOX.maxLon &&
+         c.lat >= US_BBOX.minLat && c.lat <= US_BBOX.maxLat;
+}
+
+function _availableShowAllTypes(st) {
+  const types = [];
+  if (_isViewportInUS()) {
+    if (st.has_counties) types.push('county');
+    if (st.has_zcta)     types.push('zip');
+    if (st.has_cd)        types.push('cd');
+  }
+  if (st.has_admin1) types.push('province');
+  return types.length ? types : ['county'];
+}
+
+function _renderTypeSwitch() {
+  $('showAllTypeSwitch').innerHTML = _currentShowAllTypes.map(t =>
+    `<button class="type-btn${t === showAllType ? ' active' : ''}" onclick="setShowAllType('${t}')">${TYPE_LABELS[t]}</button>`
+  ).join('');
+}
+
+async function _refreshShowAllTypes() {
+  const st = await getServerStatus();
+  _currentShowAllTypes = _availableShowAllTypes(st);
+  if (!_currentShowAllTypes.includes(showAllType)) {
+    showAllType = _currentShowAllTypes[0];
+    _clearHover();
+  }
+  _renderTypeSwitch();
+}
 
 // Leaflet control button
 const _showAllCtrl = L.control({position:'topleft'});
 _showAllCtrl.onAdd = function() {
   const d = L.DomUtil.create('div', 'show-all-ctrl');
-  d.innerHTML = '<button id="showAllBtn" onclick="toggleShowAll()">🗺 Показать все зоны</button>';
+  d.innerHTML = `
+    <button id="showAllBtn" onclick="toggleShowAll()">🗺 Показать все зоны</button>
+    <div class="type-switch" id="showAllTypeSwitch" style="display:none"></div>
+    <div id="showAllStatus" style="display:none;font-size:10.5px;color:#5f6368;margin-top:4px;max-width:180px"></div>`;
   L.DomEvent.disableClickPropagation(d);
   L.DomEvent.disableScrollPropagation(d);
   return d;
 };
 _showAllCtrl.addTo(map);
 
-function toggleShowAll() {
+async function toggleShowAll() {
   showAllMode = !showAllMode;
   if (showAllMode) map.doubleClickZoom.disable();
   else { map.doubleClickZoom.enable(); _clearHover(); }
   const b = $('showAllBtn');
   b.classList.toggle('active', showAllMode);
   b.textContent = showAllMode ? '✕ Скрыть зоны' : '🗺 Показать все зоны';
+  $('showAllTypeSwitch').style.display = showAllMode ? '' : 'none';
+  $('showAllStatus').style.display = showAllMode ? '' : 'none';
+  if (showAllMode) {
+    await _refreshShowAllTypes();
+    _refreshAllAreasOverlay();
+  } else {
+    _clearAllAreasOverlay();
+  }
 }
 
-// Debounced hover
+// Menu adapts as the user pans — e.g. panning from the US to elsewhere
+// swaps County/ZIP/CD for Province, mirroring the reference behavior of
+// offering granularities relevant to what's currently in view.
+map.on('moveend', function() {
+  if (!showAllMode) return;
+  _refreshShowAllTypes();
+  _refreshAllAreasOverlay();
+});
+
+function setShowAllType(type) {
+  if (type === showAllType) return;
+  showAllType = type;
+  _renderTypeSwitch();
+  _clearHover();
+  _refreshAllAreasOverlay();
+}
+
+// ── "Show all areas" light backdrop — every zone of the current type in the
+// viewport, drawn at once with a faint fill so the user can see the whole
+// grid of boundaries instead of hunting for one by hovering. Hover/dblclick
+// to actually add an exclusion still works exactly as before (unchanged) —
+// this is purely a visual aid layered underneath it.
+let _allAreasLayer = null;
+let _allAreasReqId = 0;
+const ALL_AREAS_STYLE = { color:'#b0bec5', weight:1, fillColor:'#cfd8dc', fillOpacity:.12 };
+// Below this zoom, a viewport would contain too many zones to render usefully —
+// show a "zoom in" hint instead of firing the request.
+const ALL_AREAS_MIN_ZOOM = { county:6, zip:10, cd:6, province:3 };
+
+function _clearAllAreasOverlay() {
+  if (_allAreasLayer) { map.removeLayer(_allAreasLayer); _allAreasLayer = null; }
+  $('showAllStatus').textContent = '';
+}
+
+async function _refreshAllAreasOverlay() {
+  if (!showAllMode) return;
+  const myReq = ++_allAreasReqId;
+  const minZoom = ALL_AREAS_MIN_ZOOM[showAllType] ?? 6;
+  if (map.getZoom() < minZoom) {
+    _clearAllAreasOverlay();
+    $('showAllStatus').textContent = `Приблизьте карту, чтобы увидеть зоны (${TYPE_LABELS[showAllType]})`;
+    return;
+  }
+  const b = map.getBounds();
+  const params = new URLSearchParams({
+    mode: showAllType,
+    min_lat: b.getSouth(), max_lat: b.getNorth(),
+    min_lon: b.getWest(), max_lon: b.getEast(),
+  });
+  let data;
+  try {
+    data = await (await fetch(`/api/area-all?${params}`)).json();
+  } catch { return; }
+  if (myReq !== _allAreasReqId || !showAllMode) return; // superseded by a newer pan/zoom/mode switch
+
+  if (_allAreasLayer) { map.removeLayer(_allAreasLayer); _allAreasLayer = null; }
+  const n = data?.fc?.features?.length || 0;
+  if (!n) { $('showAllStatus').textContent = 'Зон не найдено в этой области'; return; }
+
+  // interactive:false — purely a visual backdrop. Left interactive, these
+  // shapes would intercept mousemove/dblclick (Leaflet sets e.propagatedFrom
+  // on events bubbled from a vector layer), which would silently disable
+  // the existing hover-highlight and dblclick-to-exclude flow the moment
+  // the cursor is over one of them — i.e. everywhere, defeating the point.
+  _allAreasLayer = L.geoJSON(data.fc, {
+    pane: 'allAreasPane',
+    style: ALL_AREAS_STYLE,
+    interactive: false,
+  }).addTo(map);
+
+  $('showAllStatus').textContent = data.truncated
+    ? `Показаны не все зоны (>${n}) — приблизьте карту`
+    : `Зон видно: ${n}`;
+}
+
+// Debounced hover — skips the fetch entirely while the cursor is still
+// inside the already-shown shape (common when sweeping across a ZIP/county;
+// the previous per-grid-cell cache key didn't catch this and re-fetched on
+// almost every mousemove), so re-renders/network calls only happen when
+// actually crossing into a new area.
 map.on('mousemove', function(e) {
   if (!showAllMode) return;
+  if (_hoverGeom) {
+    try {
+      const pt = turf.point([e.latlng.lng, e.latlng.lat]);
+      if (turf.booleanPointInPolygon(pt, _hoverGeom)) return;
+    } catch (_) {}
+  }
   clearTimeout(_hoverTimer);
-  _hoverTimer = setTimeout(() => _hoverArea(e.latlng), 220);
+  _hoverTimer = setTimeout(() => _hoverArea(e.latlng), 100);
 });
 map.on('mouseout', function() { clearTimeout(_hoverTimer); _clearHover(); });
+
+// Which response field indicates a match, and which holds the geometry, per mode
+const AREA_FOUND_FIELD = { county:'county_fips', zip:'zip', cd:'cd_fp', province:'province_id' };
+const AREA_GEOM_FIELD  = { county:'county_geom', zip:'zip_geom', cd:'cd_geom', province:'province_geom' };
+
+function _ordinal(n) {
+  n = parseInt(n, 10);
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return n + 'th';
+  switch (n % 10) {
+    case 1: return n + 'st';
+    case 2: return n + 'nd';
+    case 3: return n + 'rd';
+    default: return n + 'th';
+  }
+}
+
+function _areaTooltip(data) {
+  switch (showAllType) {
+    case 'zip': {
+      const ctx = data.county_name ? `<br>${data.county_name}, ${data.state_abbr || data.state_name || ''}` : '';
+      return `<b>ZIP ${data.zip}</b>${ctx}`;
+    }
+    case 'cd':
+      return `<b>${data.cd_state_name || data.cd_state_abbr}'s ${_ordinal(data.cd_fp)} Congressional District</b>`;
+    case 'province':
+      return `<b>${data.province_name}</b>${data.province_country ? `<br>${data.province_country}` : ''}`;
+    default:
+      return `<b>${data.county_name}</b><br>${data.state_name || data.state_abbr}`;
+  }
+}
 
 // Map-level double-click (e.propagatedFrom is set when bubbling from a feature layer)
 map.on('dblclick', function(e) {
   if (e.propagatedFrom || !showAllMode) return;
   const {lat, lng} = e.latlng;
   _fetchAreaAt(lat, lng).then(data => {
-    if (!data?.county_fips) return;
+    if (!data?.[AREA_FOUND_FIELD[showAllType]]) return;
     _showAreaMenu(e, data);
   });
 });
 
+let _hoverGen  = 0;   // guards against a slow, stale fetch clobbering a newer hover
+let _hoverGeom = null; // geometry of the currently displayed hover shape
+
 async function _hoverArea(latlng) {
+  const myGen = ++_hoverGen;
   const data = await _fetchAreaAt(latlng.lat, latlng.lng);
+  if (myGen !== _hoverGen) return; // a newer hover already started/finished — drop this one
   _clearHover();
-  if (!data?.county_geom || !showAllMode) return;
-  _hoverLyr = L.geoJSON({type:'Feature', geometry:data.county_geom}, {
-    style: SHov, pane: 'hoverPane'
-  });
-  _hoverLyr.bindTooltip(
-    `<b>${data.county_name}</b><br>${data.state_name || data.state_abbr}`,
-    {sticky:true, offset:[12,0], className:'hover-tip'}
-  );
+  if (!showAllMode) return;
+  const geom = data?.[AREA_GEOM_FIELD[showAllType]];
+  if (!geom) return;
+  _hoverGeom = geom;
+  _hoverLyr = L.geoJSON({type:'Feature', geometry:geom}, { style: SHov, pane: 'hoverPane' });
+  _hoverLyr.bindTooltip(_areaTooltip(data), {sticky:true, offset:[12,0], className:'hover-tip'});
   _hoverLyr.addTo(map);
 }
 
 function _clearHover() {
   if (_hoverLyr) { map.removeLayer(_hoverLyr); _hoverLyr = null; }
+  _hoverGeom = null;
 }
 
 async function _fetchAreaAt(lat, lon) {
-  const key = `${lat.toFixed(2)}:${lon.toFixed(2)}`;
+  const key = `${showAllType}:${lat.toFixed(2)}:${lon.toFixed(2)}`;
   if (_areaCache.has(key)) return _areaCache.get(key);
   try {
-    const r = await fetch(`/api/area-at?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`);
+    const r = await fetch(`/api/area-at?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}&mode=${showAllType}`);
     const d = r.ok ? await r.json() : null;
-    const v = d?.county_fips ? d : null;
+    const v = d?.[AREA_FOUND_FIELD[showAllType]] ? d : null;
     _areaCache.set(key, v);
     return v;
   } catch { return null; }
@@ -803,6 +989,43 @@ async function _fetchAreaAt(lat, lon) {
 function _showAreaMenu(e, data) {
   const id = ++_pendingAreaId;
   _pendingAreaData.set(id, data);
+
+  if (showAllType === 'zip') {
+    const zk = `mark:zip:${data.zip}`;
+    const zBtn = markedItems.has(zk)
+      ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ZIP ${data.zip} уже отмечен</div>`
+      : `<button class="tb tb-p" onclick="markArea('zip',${id})">📍 ZIP ${data.zip}</button>`;
+    showTip(e, '➕ Добавить в исключения', '',
+      `${zBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+    return;
+  }
+
+  if (showAllType === 'cd') {
+    const cdLabel = `${data.cd_state_name || data.cd_state_abbr}'s ${_ordinal(data.cd_fp)} Congressional District`;
+    const cdk = `mark:cd:${data.cd_state_fips}:${data.cd_fp}`;
+    const cdBtn = markedItems.has(cdk)
+      ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${cdLabel} уже отмечен</div>`
+      : `<button class="tb tb-p" onclick="markArea('cd',${id})">📍 ${cdLabel}</button>`;
+    const sk = `mark:state:${data.state_fips}`;
+    const sBtn = data.state_name
+      ? (markedItems.has(sk)
+          ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.state_name} уже отмечен</div>`
+          : `<button class="tb tb-p" onclick="markArea('state',${id})">📍 ${data.state_name}</button>`)
+      : '';
+    showTip(e, '➕ Добавить в исключения', '',
+      `${cdBtn}${sBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+    return;
+  }
+
+  if (showAllType === 'province') {
+    const pk = `mark:province:${data.province_id}`;
+    const pBtn = markedItems.has(pk)
+      ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.province_name} уже отмечен</div>`
+      : `<button class="tb tb-p" onclick="markArea('province',${id})">📍 ${data.province_name}</button>`;
+    showTip(e, '➕ Добавить в исключения', '',
+      `${pBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+    return;
+  }
 
   const ck = `mark:county:${data.county_fips}`;
   const sk = `mark:state:${data.state_fips}`;
@@ -828,10 +1051,27 @@ async function markArea(type, dataId) {
   if (!data) return;
 
   let key, name, geom;
-  if (type === 'county') {
+  if (type === 'zip') {
+    key  = `mark:zip:${data.zip}`;
+    // "93628, California, United States" — classifyExcLine's ZIP check only
+    // looks at the part before the first comma, so this still re-parses as
+    // a plain ZIP once moved to Excluded; the state/country just make the
+    // marked-list entry legible on its own.
+    const st = data.state_name || data.state_abbr;
+    name = st ? `${data.zip}, ${st}, United States` : data.zip;
+    geom = data.zip_geom;
+  } else if (type === 'county') {
     key  = `mark:county:${data.county_fips}`;
     name = `${data.county_name}, ${data.state_abbr}`;
     geom = data.county_geom;
+  } else if (type === 'cd') {
+    key  = `mark:cd:${data.cd_state_fips}:${data.cd_fp}`;
+    name = `${data.cd_state_name || data.cd_state_abbr}'s ${_ordinal(data.cd_fp)} Congressional District`;
+    geom = data.cd_geom;
+  } else if (type === 'province') {
+    key  = `mark:province:${data.province_id}`;
+    name = data.province_name;
+    geom = data.province_geom;
   } else {
     key  = `mark:state:${data.state_fips}`;
     name = data.state_name;
@@ -842,7 +1082,7 @@ async function markArea(type, dataId) {
   if (markedItems.has(key)) return;
 
   const fc = {type:'FeatureCollection', features:[{
-    type:'Feature', properties:{display_name:name, _key:key}, geometry:geom
+    type:'Feature', properties:{display_name: type==='zip' ? `ZIP ${name}` : name, _key:key}, geometry:geom
   }]};
   const lyr = _buildMarkedLayer(fc).addTo(markedLayer);
   markedItems.set(key, {name, lyr});
@@ -915,7 +1155,7 @@ function buildNeuLayer(fc) {
     onEachFeature(feat, lyr) {
       const p   = feat.properties;
       const zip = p.ZCTA5CE20 || p.zip;
-      const label = p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '');
+      const label = (p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '')) + (p.approx ? ' (прибл. граница)' : '');
       lyr.bindTooltip(label, {sticky:true, offset:[10,0], className:'nt'});
 
       lyr.on('mousemove', function(e) {

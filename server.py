@@ -169,16 +169,43 @@ def point_in_geom(px, py, geom):
 # ── Query functions ───────────────────────────────────────────────────────────
 
 def query_zips(zips):
+    """Direct ZCTA match first; any ZIP with no polygon of its own falls back
+    to its parent ZCTA via the HRSA ZIP→ZCTA crosswalk (~41k USPS ZIPs vs.
+    ~33.8k with their own ZCTA — the rest are PO boxes/unique-recipient/
+    sparse-rural ZIPs that legitimately don't have a distinct Census area)."""
     conn = get_conn()
     ph = ",".join("?" * len(zips))
     rows = conn.execute(f"SELECT zip, geometry FROM zcta WHERE zip IN ({ph})", zips).fetchall()
+    geoms = {r["zip"]: r["geometry"] for r in rows}
+    approx = set()
+
+    missing = [z for z in zips if z not in geoms]
+    if missing and has_table(conn, "zip_crosswalk"):
+        ph2 = ",".join("?" * len(missing))
+        cw_rows = conn.execute(
+            f"SELECT zip, zcta FROM zip_crosswalk WHERE zip IN ({ph2})", missing
+        ).fetchall()
+        needed = {r["zcta"] for r in cw_rows if r["zcta"] not in geoms}
+        if needed:
+            ph3 = ",".join("?" * len(needed))
+            zcta_rows = conn.execute(
+                f"SELECT zip, geometry FROM zcta WHERE zip IN ({ph3})", list(needed)
+            ).fetchall()
+            parent_geom = {r["zip"]: r["geometry"] for r in zcta_rows}
+            for r in cw_rows:
+                if r["zcta"] in parent_geom:
+                    geoms[r["zip"]] = parent_geom[r["zcta"]]
+                    approx.add(r["zip"])
     conn.close()
-    return _fc([{
-        "type": "Feature",
-        "properties": {"ZCTA5CE20": r["zip"], "region_type": "zip",
-                       "region_id": r["zip"], "display_name": f"ZIP {r['zip']}"},
-        "geometry": json.loads(r["geometry"]),
-    } for r in rows])
+
+    features = []
+    for zip_, geom in geoms.items():
+        props = {"ZCTA5CE20": zip_, "region_type": "zip",
+                  "region_id": zip_, "display_name": f"ZIP {zip_}"}
+        if zip_ in approx:
+            props["approx"] = True
+        features.append({"type": "Feature", "properties": props, "geometry": json.loads(geom)})
+    return _fc(features)
 
 
 def _us_state_abbr(conn, st_raw):
@@ -343,6 +370,12 @@ def search_region(q):
 def get_zip_context(zip_code):
     conn = get_conn()
     row = conn.execute("SELECT cx, cy FROM zcta WHERE zip=?", (zip_code,)).fetchone()
+    if not row and has_table(conn, "zip_crosswalk"):
+        # This ZIP has no ZCTA of its own — use its parent ZCTA's centroid
+        # (HRSA ZIP→ZCTA crosswalk) as an approximation for county/state context.
+        cw = conn.execute("SELECT zcta FROM zip_crosswalk WHERE zip=?", (zip_code,)).fetchone()
+        if cw:
+            row = conn.execute("SELECT cx, cy FROM zcta WHERE zip=?", (cw["zcta"],)).fetchone()
     if not row:
         conn.close()
         return None
@@ -462,13 +495,16 @@ def query_cd_batch(items):
     return result
 
 
-def area_at(lat, lon):
-    """Return county + state at given lat/lon for the Show All Areas hover feature."""
+def area_at(lat, lon, mode="county"):
+    """Return county + state (mode=county) or ZIP + county + state context
+    (mode=zip) at a given lat/lon, for the Show All Areas hover feature."""
     conn = get_conn()
     px, py = float(lon), float(lat)
     result = {}
 
-    if has_table(conn, "counties"):
+    # Province mode doesn't use county/state context (its tooltip only shows
+    # the province + country) — skip this lookup there, it's dead work.
+    if mode != "province" and has_table(conn, "counties"):
         candidates = conn.execute(
             "SELECT fips,name,namelsad,state_fips,state_abbr,geometry FROM counties "
             "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=?",
@@ -496,8 +532,107 @@ def area_at(lat, lon):
         if row:
             result["state_name"] = row["name"]
 
+    if mode == "zip" and has_table(conn, "zcta"):
+        zrows = conn.execute(
+            "SELECT zip,geometry FROM zcta "
+            "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=?",
+            (px, px, py, py)
+        ).fetchall()
+        for z in zrows:
+            geom = json.loads(z["geometry"])
+            if point_in_geom(px, py, geom):
+                result["zip"] = z["zip"]
+                result["zip_geom"] = geom
+                break
+
+    if mode == "province" and has_table(conn, "admin1"):
+        prows = conn.execute(
+            "SELECT id,name,country,geometry FROM admin1 "
+            "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=?",
+            (px, px, py, py)
+        ).fetchall()
+        for p in prows:
+            geom = json.loads(p["geometry"])
+            if point_in_geom(px, py, geom):
+                result["province_id"]      = p["id"]
+                result["province_name"]    = p["name"]
+                result["province_country"] = p["country"]
+                result["province_geom"]    = geom
+                break
+
+    if mode == "cd" and has_table(conn, "congressional_districts"):
+        crows = conn.execute(
+            "SELECT state_fips,cd_fp,namelsad,geometry FROM congressional_districts "
+            "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=?",
+            (px, px, py, py)
+        ).fetchall()
+        for c in crows:
+            geom = json.loads(c["geometry"])
+            if point_in_geom(px, py, geom):
+                abbr = _STATE_FIPS_TO_ABBR.get(c["state_fips"], "")
+                state_row = conn.execute(
+                    "SELECT name FROM admin1 WHERE iso=? AND country='United States of America'",
+                    (f"US-{abbr}",)
+                ).fetchone() if abbr and has_table(conn, "admin1") else None
+                result["cd_state_fips"] = c["state_fips"]
+                result["cd_fp"]         = c["cd_fp"]
+                result["cd_namelsad"]   = c["namelsad"]
+                result["cd_state_abbr"] = abbr
+                result["cd_state_name"] = state_row["name"] if state_row else ""
+                result["cd_geom"]       = geom
+                break
+
     conn.close()
     return result or None
+
+
+def area_all(mode, min_lon, min_lat, max_lon, max_lat, limit=1500):
+    """All zones of the given mode whose bbox overlaps the viewport — lets
+    the frontend paint every ZIP/county/CD/province in view at once (light
+    highlight) instead of the user hunting for boundaries one hover at a
+    time. Approximate (bbox overlap, not exact polygon-viewport intersection)
+    since this is a visual aid, not a precise computation — cheap even for a
+    few hundred candidates."""
+    conn = get_conn()
+    features = []
+    truncated = False
+
+    def _bbox_rows(table, cols):
+        return conn.execute(
+            f"SELECT {cols} FROM {table} "
+            "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=? "
+            "LIMIT ?",
+            (max_lon, min_lon, max_lat, min_lat, limit + 1)
+        ).fetchall()
+
+    if mode == "zip" and has_table(conn, "zcta"):
+        rows = _bbox_rows("zcta", "zip,geometry")
+        truncated = len(rows) > limit
+        for r in rows[:limit]:
+            features.append(_feat("zip", r["zip"], f"ZIP {r['zip']}", r["geometry"]))
+
+    elif mode == "county" and has_table(conn, "counties"):
+        rows = _bbox_rows("counties", "fips,namelsad,state_abbr,geometry")
+        truncated = len(rows) > limit
+        for r in rows[:limit]:
+            features.append(_feat("county", r["fips"], f"{r['namelsad']}, {r['state_abbr']}", r["geometry"]))
+
+    elif mode == "cd" and has_table(conn, "congressional_districts"):
+        rows = _bbox_rows("congressional_districts", "state_fips,cd_fp,namelsad,geometry")
+        truncated = len(rows) > limit
+        for r in rows[:limit]:
+            key = f"{r['state_fips']}:{r['cd_fp']}"
+            features.append(_feat("congressional_district", key, r["namelsad"], r["geometry"]))
+
+    elif mode == "province" and has_table(conn, "admin1"):
+        rows = _bbox_rows("admin1", "id,name,country,geometry")
+        truncated = len(rows) > limit
+        for r in rows[:limit]:
+            display = f"{r['name']}, {r['country']}" if r["country"] else r["name"]
+            features.append(_feat("admin1", r["id"], display, r["geometry"]))
+
+    conn.close()
+    return {"fc": _fc(features), "truncated": truncated}
 
 
 def _feat(rtype, rid, name, geom_json):
@@ -549,8 +684,19 @@ class Handler(BaseHTTPRequestHandler):
                 lon = float(params.get("lon", [None])[0])
             except (TypeError, ValueError):
                 return self._err(400, "lat and lon required")
-            data = area_at(lat, lon)
+            mode = params.get("mode", ["county"])[0]
+            data = area_at(lat, lon, mode)
             self._ok(data if data else {})
+        elif parsed.path == "/api/area-all":
+            try:
+                min_lat = float(params.get("min_lat", [None])[0])
+                max_lat = float(params.get("max_lat", [None])[0])
+                min_lon = float(params.get("min_lon", [None])[0])
+                max_lon = float(params.get("max_lon", [None])[0])
+            except (TypeError, ValueError):
+                return self._err(400, "min_lat/max_lat/min_lon/max_lon required")
+            mode = params.get("mode", ["county"])[0]
+            self._ok(area_all(mode, min_lon, min_lat, max_lon, max_lat))
         elif parsed.path == "/api/status":
             conn = get_conn()
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
@@ -563,6 +709,7 @@ class Handler(BaseHTTPRequestHandler):
                 "has_cd":        "congressional_districts" in tables,
                 "has_dma":       "dma_counties"             in tables,
                 "has_cousub":    "cousub"                   in tables,
+                "has_zip_crosswalk": "zip_crosswalk"         in tables,
             }
             if info["has_zcta"]:
                 info["zip_count"] = conn.execute("SELECT COUNT(*) FROM zcta").fetchone()[0]
