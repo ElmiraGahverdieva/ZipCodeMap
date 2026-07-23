@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 One-time setup: downloads ZCTA + Natural Earth countries/provinces into SQLite.
-Run once; then use start.sh every time.
-  python3 setup.py                         # auto-download everything
-  python3 setup.py --file cb_...zip        # supply ZCTA zip manually
-  python3 setup.py --rebuild               # force full rebuild
-  python3 setup.py --cousub                # add county subdivisions (townships/precincts)
-  python3 setup.py --cd                    # add congressional districts + admin1 bbox migration
+Run once; then use start.bat (Windows) every time.
+  python setup.py                         # auto-download everything
+  python setup.py --file cb_...zip        # supply ZCTA zip manually
+  python setup.py --rebuild               # force full rebuild
+  python setup.py --cousub                # add county subdivisions (townships/precincts)
+  python setup.py --cd                    # add congressional districts + admin1 bbox migration
 """
 import csv
 import json
@@ -89,11 +89,11 @@ def ensure_pyshp():
     except ImportError:
         pass
     print("  Устанавливаю pyshp...")
-    for cmd in ([sys.executable, "-m", "pip", "install", "pyshp"], ["pip3", "install", "pyshp"]):
+    for cmd in ([sys.executable, "-m", "pip", "install", "pyshp"], ["pip", "install", "pyshp"]):
         if subprocess.run(cmd, capture_output=True).returncode == 0:
             print("  ✓ pyshp установлен")
             return True
-    print("  ❌ Не удалось: pip3 install pyshp")
+    print("  ❌ Не удалось: pip install pyshp")
     return False
 
 
@@ -183,6 +183,9 @@ def read_shapefile(zip_path):
             except Exception:
                 continue
             records.append((rec, geom))
+        sf.close()  # release .shp/.dbf/.shx handles before TemporaryDirectory
+                    # tries to delete them — required on Windows, which
+                    # (unlike Unix) refuses to remove a file that's still open
         return fields, records
 
 
@@ -322,7 +325,7 @@ def main():
 
     if "--cousub" in sys.argv:
         if not os.path.exists(DB_PATH):
-            print("❌ zcta.db не найдена. Сначала запустите: python3 setup.py")
+            print("❌ zcta.db не найдена. Сначала запустите: python setup.py")
             return False
         if not ensure_pyshp():
             return False
@@ -336,7 +339,7 @@ def main():
 
     if "--cd" in sys.argv:
         if not os.path.exists(DB_PATH):
-            print("❌ zcta.db не найдена. Сначала запустите: python3 setup.py")
+            print("❌ zcta.db не найдена. Сначала запустите: python setup.py")
             return False
         if not ensure_pyshp():
             return False
@@ -365,7 +368,7 @@ def main():
         if (n_zcta > 0 and n_countries > 0 and n_admin1 > 0 and n_dma > 0 and n_zxwalk > 0
                 and admin1_has_bbox and not manual_zcta):
             print(f"✅ База уже полная: {n_zcta} ZIP · {n_countries} стран · {n_admin1} регионов · {n_dma} DMA-записей")
-            print("   Для пересоздания: python3 setup.py --rebuild")
+            print("   Для пересоздания: python setup.py --rebuild")
             return True
 
         # Partial DB — add only missing tables
@@ -394,7 +397,7 @@ def main():
     print("=== ZIP Code Map — первоначальная настройка ===\n")
 
     if not ensure_pyshp():
-        print("\n❌ Установите вручную: pip3 install pyshp")
+        print("\n❌ Установите вручную: pip install pyshp")
         return False
 
     if os.path.exists(DB_PATH):
@@ -418,7 +421,7 @@ def main():
     if not zcta_zip:
         print("\n❌ Скачайте вручную в Safari:")
         print("   https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip")
-        print("   Затем: python3 setup.py --file cb_2020_us_zcta520_500k.zip")
+        print("   Затем: python setup.py --file cb_2020_us_zcta520_500k.zip")
         conn.close()
         return False
     try:

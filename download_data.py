@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Diagnostic downloader — tries multiple sources and shows exactly what goes wrong.
-Run: python3 download_data.py
+Run: python download_data.py
 """
 import json
 import os
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     for url in URLS:
         if try_download(url):
             print("\n✅ Запускайте:")
-            print(f"   python3 setup.py --file {OUT}")
+            print(f"   python setup.py --file {OUT}")
             sys.exit(0)
 
     print("\n" + "="*50)
@@ -115,5 +115,5 @@ if __name__ == "__main__":
     print("   mv ~/Downloads/cb_2020_us_zcta520_500k.zip ~/zipcodemap/")
     print()
     print("4. Запустите:")
-    print("   python3 setup.py --file cb_2020_us_zcta520_500k.zip")
+    print("   python setup.py --file cb_2020_us_zcta520_500k.zip")
     sys.exit(1)

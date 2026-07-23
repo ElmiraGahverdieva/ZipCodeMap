@@ -772,7 +772,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     os.chdir(BASE_DIR)
     if not os.path.exists(DB_PATH):
-        print("❌ База данных не найдена. Запустите: python3 setup.py --file <файл>")
+        print("❌ База данных не найдена. Запустите: python setup.py --file <файл>")
         sys.exit(1)
 
     conn = sqlite3.connect(DB_PATH)
