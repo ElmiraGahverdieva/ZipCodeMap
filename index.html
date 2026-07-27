@@ -147,6 +147,17 @@
     </div>
     <div class="prog-wrap"><div class="prog-bar pb-red" id="eProg"></div></div>
     <div class="status" id="eStat">Готов</div>
+    <button id="bulkExcludeBtn" onclick="bulkAddRemainingToExcluded()"
+      style="margin-top:6px;width:100%;background:#fff;border:2px solid #d93025;color:#d93025;
+             border-radius:6px;padding:7px 10px;font-size:11.5px;font-weight:600;cursor:pointer">
+      🌐 Добавить всё оставшееся по США в исключения
+    </button>
+  </div>
+
+  <div id="bulkResultPanel" class="panel" style="display:none;flex-shrink:0;max-height:220px">
+    <div class="panel-title"><span class="dot dot-red"></span>Массово добавлено в исключения</div>
+    <div id="bulkResultList" style="font-size:10.5px;overflow-y:auto;flex:1;min-height:24px;padding:2px 0"></div>
+    <div class="btn-row"><button class="btn-clr" onclick="$('bulkResultPanel').style.display='none'">✕ Закрыть</button></div>
   </div>
 
   <div class="panel">
@@ -234,12 +245,25 @@ const US_STATE_NAME_TO_ABBR = {
   'oregon':'OR','pennsylvania':'PA','rhode island':'RI','south carolina':'SC',
   'south dakota':'SD','tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT',
   'virginia':'VA','washington':'WA','west virginia':'WV','wisconsin':'WI',
-  'wyoming':'WY','district of columbia':'DC'
+  'wyoming':'WY','district of columbia':'DC',
+  'puerto rico':'PR','guam':'GU','american samoa':'AS',
+  'northern mariana islands':'MP','u.s. virgin islands':'VI'
 };
 function toStateAbbr(s) {
   if (!s) return '';
   if (s.length === 2) return s.toUpperCase();
   return US_STATE_NAME_TO_ABBR[s.toLowerCase()] || s.toUpperCase();
+}
+
+// 2-letter abbreviation → full title-case name (reverse of US_STATE_NAME_TO_ABBR),
+// e.g. for building "98283, Washington, United States"-style labels.
+const US_STATE_ABBR_TO_NAME = Object.fromEntries(
+  Object.entries(US_STATE_NAME_TO_ABBR).map(([name, abbr]) =>
+    [abbr, name.replace(/\b\w/g, c => c.toUpperCase())])
+);
+function toStateFullName(s) {
+  if (!s) return '';
+  return US_STATE_ABBR_TO_NAME[s.toUpperCase()] || s;
 }
 
 // State name → FIPS (for TIGERweb congressional district queries)
@@ -635,7 +659,7 @@ function buildIncLayer(fc){
 }
 
 function buildIncActions(zip, ctx){
-  const a = [`<button class="tb tb-r" onclick="excludeAsZip('${zip}')">🚫 Исключить ZIP ${zip}</button>`];
+  const a = [`<button class="tb tb-r" onclick="excludeAsZip('${zip}','${esc(ctx?.state_abbr||'')}','${esc(ctx?.state_name||'')}')">🚫 Исключить ZIP ${zip}</button>`];
   if(ctx?.county_name)
     a.push(`<button class="tb tb-r" onclick="excludeAsCounty('${esc(ctx.county_fips||'')}','${esc(ctx.county_name)}','${esc(ctx.state_abbr||'')}','${esc(ctx.state_name||'')}')">🚫 Исключить County: ${ctx.county_name}</button>`);
   if(ctx?.state_name)
@@ -1057,12 +1081,13 @@ async function markArea(type, dataId) {
     // looks at the part before the first comma, so this still re-parses as
     // a plain ZIP once moved to Excluded; the state/country just make the
     // marked-list entry legible on its own.
-    const st = data.state_name || data.state_abbr;
+    const st = toStateFullName(data.state_abbr) || data.state_name;
     name = st ? `${data.zip}, ${st}, United States` : data.zip;
     geom = data.zip_geom;
   } else if (type === 'county') {
     key  = `mark:county:${data.county_fips}`;
-    name = `${data.county_name}, ${data.state_abbr}`;
+    const st = toStateFullName(data.state_abbr) || data.state_name;
+    name = st ? `${data.county_name}, ${st}, United States` : data.county_name;
     geom = data.county_geom;
   } else if (type === 'cd') {
     key  = `mark:cd:${data.cd_state_fips}:${data.cd_fp}`;
@@ -1074,7 +1099,8 @@ async function markArea(type, dataId) {
     geom = data.province_geom;
   } else {
     key  = `mark:state:${data.state_fips}`;
-    name = data.state_name;
+    const st = data.state_name || toStateFullName(data.state_abbr);
+    name = st ? `${st}, United States` : data.state_abbr;
     const fc = await fetchStateBoundary(data.state_abbr || data.state_name);
     if (!fc?.features?.length) return;
     geom = fc.features[0].geometry;
@@ -1214,21 +1240,24 @@ function removeNeutral(raw) {
 }
 
 // ── Exclude actions ───────────────────────────────────────────────────────────
-async function excludeAsZip(zip){
+async function excludeAsZip(zip, stAbbr, stName){
   hideTipNow();
   const key=`zip:${zip}`;
   if(exclusions.has(key)) return;
   try{
+    const st = toStateFullName(stAbbr) || stName;
+    const label = st ? `${zip}, ${st}, United States` : `ZIP ${zip}`;
     const fc = await(await fetch(`/api/zcta?zips=${zip}`)).json();
-    fc.features.forEach(f=>f.properties.display_name=`ZIP ${zip}`);
-    addExclusion(key, `ZIP ${zip}`, fc);
-    appendExcTA(zip);
+    fc.features.forEach(f=>f.properties.display_name=label);
+    addExclusion(key, label, fc);
+    appendExcTA(st ? label : zip);
   }catch(e){ console.error(e); }
 }
 
 async function excludeAsCounty(fips, name, stAbbr, stName){
   hideTipNow();
-  const label = `${name}${stAbbr?', '+stAbbr:''}`;
+  const st = toStateFullName(stAbbr) || stName;
+  const label = st ? `${name}, ${st}, United States` : name;
   const key = `county:${fips||label}`;
   if(exclusions.has(key)) return;
   const cleanName = name.replace(/\s*county\s*$/i, '');
@@ -1244,12 +1273,13 @@ async function excludeAsState(fips, name, abbr){
   hideTipNow();
   const key = `state:${fips||name}`;
   if(exclusions.has(key)) return;
-  const display = name||(abbr?'State '+abbr:'');
+  const st = name || toStateFullName(abbr);
+  const display = st ? `${st}, United States` : (abbr ? 'State '+abbr : '');
   const fc = await fetchStateBoundary(abbr || name);
   if(fc?.features?.length){
     fc.features.forEach(f=>f.properties.display_name=display);
     addExclusion(key, display, fc);
-    appendExcTA(abbr||name);
+    appendExcTA(display);
   }
 }
 
@@ -2498,6 +2528,153 @@ function clearNeutral() {
   neuLayer.clearLayers();
   neuLayers.clear();
   setProg('nProg', 0); setStat('nStat', 'Готов');
+}
+
+// ── Bulk-add remaining US zones to Excluded ────────────────────────────────
+// County-first, ZIP-only-where-needed: a county whose polygon doesn't touch
+// any Included zone is added whole; a county that DOES touch one is split
+// into its ZIPs (via /api/zips-in-counties) and only the ZIPs that
+// genuinely don't overlap Included get added. Anything that can't be
+// proven overlap-free is left out entirely, per spec — no guessing.
+function _bboxOverlap(a, b) {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
+async function bulkAddRemainingToExcluded() {
+  const incFeatures = [];
+  incLayer.eachLayer(grp => {
+    if (grp.eachLayer) grp.eachLayer(l => { if (l.feature) incFeatures.push(l.feature); });
+  });
+  if (!incFeatures.length) {
+    setStat('eStat', '⚠️ Сначала загрузите Included areas — иначе не от чего отталкиваться');
+    return;
+  }
+
+  const btn = $('bulkExcludeBtn');
+  const origLabel = btn.textContent;
+  btn.disabled = true;
+
+  try {
+    const incBboxes = incFeatures.map(f => turf.bbox(f));
+
+    // Real shared-area overlap, not mere border-touching: turf.intersect()
+    // returns null for two polygons that only share a boundary line (e.g.
+    // neighboring counties), and an actual polygon (with area) when they
+    // truly cover common ground. booleanIntersects would count adjacency
+    // alone as "overlap" and needlessly drop every bordering county to ZIP
+    // level — this is both more correct and much faster.
+    const overlapsIncluded = (feat, bbox) => {
+      const candidates = incFeatures.filter((f, i) => _bboxOverlap(bbox, incBboxes[i]));
+      for (const inc of candidates) {
+        try { if (turf.intersect(feat, inc)) return true; }
+        catch { return true; } // can't prove no-overlap → treat as overlapping (safe default)
+      }
+      return false;
+    };
+
+    // States already excluded wholesale (as a state, however that entry was
+    // added — hover, bulk, right-click, or typed) → skip their counties
+    // entirely instead of adding redundant county-level duplicates on top
+    // of coverage that's already there. Matched by display text rather than
+    // a specific key format since state exclusions get added through
+    // several different code paths that don't all key them the same way.
+    const excludedStateAbbrs = new Set();
+    for (const {name} of exclusions.values()) {
+      // A bare state name typed with no "United States" qualifier (e.g. just
+      // "Texas") doesn't match classifyExcLine's state branch at all — it
+      // falls through to the generic place lookup, which resolves via
+      // admin1 and labels it "Texas, United States of America" (the "of
+      // America" — not just "United States" — is admin1's own country
+      // field), so both suffix forms need stripping here.
+      const clean = name.replace(/,?\s*(united states of america|united states)$/i, '').trim();
+      if (clean.length === 2 && US_STATE_ABBRS.has(clean.toUpperCase())) excludedStateAbbrs.add(clean.toUpperCase());
+      else if (US_STATE_NAMES.has(clean.toLowerCase())) excludedStateAbbrs.add(toStateAbbr(clean));
+    }
+
+    setStat('eStat', 'Загружаю все округа США...');
+    const countyResp = await fetch('/api/area-all?mode=county&min_lat=-90&max_lat=90&min_lon=-180&max_lon=180&limit=5000');
+    const countyData = await countyResp.json();
+    const allCounties = countyData.fc.features.filter(cf => !excludedStateAbbrs.has(cf.properties.state_abbr));
+    const skippedForState = countyData.fc.features.length - allCounties.length;
+
+    const safeCounties = [];
+    const drilldownFips = [];
+    for (let i = 0; i < allCounties.length; i++) {
+      if (i % 300 === 0) setStat('eStat', `Проверяю округа: ${i}/${allCounties.length}...`);
+      const cf = allCounties[i];
+      let cbbox;
+      try { cbbox = turf.bbox(cf); } catch { continue; }
+      if (overlapsIncluded(cf, cbbox)) drilldownFips.push(cf.properties.region_id);
+      else safeCounties.push(cf);
+    }
+
+    const safeZips = [];
+    const allDrillZipsByZip = new Map(); // zip → its feature, so we can render it later without re-fetching
+    if (drilldownFips.length) {
+      setStat('eStat', `Уточняю ZIP внутри ${drilldownFips.length} пересекающихся округов...`);
+      const zResp = await fetch('/api/zips-in-counties', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(drilldownFips)
+      });
+      const zData = await zResp.json();
+      const allDrillZips = Object.values(zData).flat();
+      for (const zf of allDrillZips) allDrillZipsByZip.set(zf.zip, zf);
+      for (let i = 0; i < allDrillZips.length; i++) {
+        if (i % 300 === 0) setStat('eStat', `Проверяю ZIP: ${i}/${allDrillZips.length}...`);
+        const zf = allDrillZips[i];
+        const feat = { type:'Feature', properties:{}, geometry: zf.geometry };
+        let zbbox;
+        try { zbbox = turf.bbox(feat); } catch { continue; }
+        if (!overlapsIncluded(feat, zbbox)) safeZips.push(zf.zip);
+      }
+    }
+
+    if (!safeCounties.length && !safeZips.length) {
+      setStat('eStat', 'Не найдено зон без пересечения с Included — по всей стране либо покрыто, либо неоднозначно.');
+      return;
+    }
+
+    // Render directly from the geometry we already fetched — addExclusion()
+    // skips straight to drawing, no name-based re-lookup or Nominatim
+    // fallback (loadExcluded() would otherwise redo all of that per line,
+    // which is both pointless — we already have the authoritative shape —
+    // and, for a few thousand lines, extremely slow).
+    setStat('eStat', `Наношу на карту: ${safeCounties.length + safeZips.length} зон...`);
+    // "Allegheny County, Pennsylvania, United States" / "98283, Washington,
+    // United States" — full state name + country, not the abbreviation, to
+    // match the format used everywhere else excluded addresses get added.
+    for (const cf of safeCounties) {
+      const st = toStateFullName(cf.properties.state_abbr);
+      const name = st ? `${cf.properties.namelsad}, ${st}, United States` : cf.properties.display_name;
+      const key = `county:${name.toLowerCase()}`;
+      cf.properties.display_name = name;
+      appendExcTA(name);
+      addExclusion(key, name, { type:'FeatureCollection', features:[cf] });
+    }
+    for (const zip of safeZips) {
+      const zf = allDrillZipsByZip.get(zip);
+      const st = toStateFullName(zf.state_abbr);
+      const name = st ? `${zip}, ${st}, United States` : `ZIP ${zip}`;
+      const key = `zip:${zip}`;
+      appendExcTA(st ? name : zip); // re-parseable either way — classifyExcLine's ZIP check only looks at the leading digits
+      addExclusion(key, name, { type:'FeatureCollection', features:[{ type:'Feature', properties:{display_name:name}, geometry: zf.geometry }] });
+    }
+
+    const added = [...safeCounties.map(cf => cf.properties.display_name), ...safeZips.map(zip => {
+      const st = toStateFullName(allDrillZipsByZip.get(zip)?.state_abbr);
+      return st ? `${zip}, ${st}, United States` : `ZIP ${zip}`;
+    })];
+    $('bulkResultList').innerHTML = added.map(s => `<div>• ${s}</div>`).join('');
+    $('bulkResultPanel').style.display = '';
+    const skipNote = skippedForState ? ` · пропущено ${skippedForState} округов (штат уже исключён целиком)` : '';
+    setStat('eStat', `✅ Добавлено: ${added.length} зон (${safeCounties.length} округов, ${safeZips.length} ZIP)${skipNote}`);
+  } catch (e) {
+    console.error('bulkAddRemainingToExcluded failed:', e);
+    setStat('eStat', '❌ Ошибка массового добавления: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origLabel;
+  }
 }
 </script>
 </body>

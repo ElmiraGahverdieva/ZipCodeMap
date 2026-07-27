@@ -30,6 +30,7 @@ _STATE_FIPS_TO_ABBR = {
     '39':'OH','40':'OK','41':'OR','42':'PA','44':'RI','45':'SC','46':'SD',
     '47':'TN','48':'TX','49':'UT','50':'VT','51':'VA','53':'WA','54':'WV',
     '55':'WI','56':'WY',
+    '60':'AS','66':'GU','69':'MP','72':'PR','78':'VI',  # territories
 }
 
 
@@ -615,7 +616,8 @@ def area_all(mode, min_lon, min_lat, max_lon, max_lat, limit=1500):
         rows = _bbox_rows("counties", "fips,namelsad,state_abbr,geometry")
         truncated = len(rows) > limit
         for r in rows[:limit]:
-            features.append(_feat("county", r["fips"], f"{r['namelsad']}, {r['state_abbr']}", r["geometry"]))
+            features.append(_feat("county", r["fips"], f"{r['namelsad']}, {r['state_abbr']}", r["geometry"],
+                                   extra={"namelsad": r["namelsad"], "state_abbr": r["state_abbr"]}))
 
     elif mode == "cd" and has_table(conn, "congressional_districts"):
         rows = _bbox_rows("congressional_districts", "state_fips,cd_fp,namelsad,geometry")
@@ -635,10 +637,45 @@ def area_all(mode, min_lon, min_lat, max_lon, max_lat, limit=1500):
     return {"fc": _fc(features), "truncated": truncated}
 
 
-def _feat(rtype, rid, name, geom_json):
+def zips_in_counties(fips_list):
+    """For each given county FIPS, the ZIPs whose ZCTA centroid falls within
+    that county's polygon — used by the bulk-exclude feature to drill from
+    county down to ZIP granularity only for counties that overlap an
+    Included zone (mirrors get_zip_context's zip→county lookup, just
+    inverted: county → its zips)."""
+    conn = get_conn()
+    result = {}
+    if not (has_table(conn, "counties") and has_table(conn, "zcta")):
+        conn.close()
+        return result
+    ph = ",".join("?" * len(fips_list))
+    counties = conn.execute(
+        f"SELECT fips,state_abbr,bbox_minx,bbox_miny,bbox_maxx,bbox_maxy,geometry FROM counties WHERE fips IN ({ph})",
+        fips_list
+    ).fetchall()
+    for c in counties:
+        zrows = conn.execute(
+            "SELECT zip,cx,cy,geometry FROM zcta "
+            "WHERE bbox_minx<=? AND bbox_maxx>=? AND bbox_miny<=? AND bbox_maxy>=?",
+            (c["bbox_maxx"], c["bbox_minx"], c["bbox_maxy"], c["bbox_miny"])
+        ).fetchall()
+        geom = json.loads(c["geometry"])
+        zips = []
+        for z in zrows:
+            if point_in_geom(z["cx"], z["cy"], geom):
+                zips.append({"zip": z["zip"], "geometry": json.loads(z["geometry"]), "state_abbr": c["state_abbr"]})
+        result[c["fips"]] = zips
+    conn.close()
+    return result
+
+
+def _feat(rtype, rid, name, geom_json, extra=None):
+    props = {"region_type": rtype, "region_id": rid, "display_name": name}
+    if extra:
+        props.update(extra)
     return {
         "type": "Feature",
-        "properties": {"region_type": rtype, "region_id": rid, "display_name": name},
+        "properties": props,
         "geometry": json.loads(geom_json) if isinstance(geom_json, str) else geom_json,
     }
 
@@ -696,7 +733,11 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self._err(400, "min_lat/max_lat/min_lon/max_lon required")
             mode = params.get("mode", ["county"])[0]
-            self._ok(area_all(mode, min_lon, min_lat, max_lon, max_lat))
+            try:
+                limit = int(params.get("limit", ["1500"])[0])
+            except ValueError:
+                limit = 1500
+            self._ok(area_all(mode, min_lon, min_lat, max_lon, max_lat, limit=limit))
         elif parsed.path == "/api/status":
             conn = get_conn()
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
@@ -744,7 +785,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path in ("/api/counties-batch", "/api/cd-batch", "/api/dma-batch"):
+        if parsed.path in ("/api/counties-batch", "/api/cd-batch", "/api/dma-batch", "/api/zips-in-counties"):
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(length)
@@ -755,6 +796,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._ok(query_cd_batch(items))
                 elif parsed.path == "/api/dma-batch":
                     self._ok(query_dma_batch(items))
+                elif parsed.path == "/api/zips-in-counties":
+                    self._ok(zips_in_counties(items))
                 else:
                     self._ok(query_counties_batch(items))
             except Exception as e:
