@@ -284,8 +284,8 @@ const US_STATE_FIPS = {
 
 // ── Map ───────────────────────────────────────────────────────────────────────
 const map = L.map('map').setView([39.5,-98.35],5);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
-  attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OpenStreetMap contributors',subdomains:'abc',maxZoom:19
 }).addTo(map);
 
 map.createPane('hoverPane');
