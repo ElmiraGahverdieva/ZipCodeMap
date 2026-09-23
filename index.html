@@ -19,7 +19,7 @@
     }
     .panel{
       display:flex;flex-direction:column;gap:7px;
-      padding:12px 11px;flex:1;min-height:0;overflow:hidden
+      padding:12px 11px;flex:0 0 auto;min-height:0;overflow:hidden
     }
     .panel+.panel{border-top:2px solid #e8eaed}
 
@@ -28,17 +28,16 @@
       text-transform:uppercase;display:flex;align-items:center;gap:5px;flex-shrink:0
     }
     .dot{width:11px;height:11px;border-radius:2px;flex-shrink:0}
-    .dot-blue{background:#1a73e8}.dot-red{background:#d93025}.dot-gray{background:#9e9e9e}.dot-pink{background:#e91e63}
+    .dot-blue{background:#1a73e8}.dot-red{background:#d93025}
 
     textarea{
-      flex:1;min-height:60px;padding:7px 8px;
+      flex:0 0 auto;height:88px;padding:7px 8px;
       font-size:11.5px;font-family:"SF Mono","Courier New",monospace;
       border:1px solid #dadce0;border-radius:5px;background:#fafafa;
-      color:#202124;resize:none;outline:none;line-height:1.55;transition:border-color .15s
+      color:#202124;resize:vertical;outline:none;line-height:1.55;transition:border-color .15s
     }
     #incInput:focus{border-color:#1a73e8;background:#fff}
     #excInput:focus{border-color:#d93025;background:#fff}
-    #neuInput:focus{border-color:#757575;background:#fff}
 
     .btn-row{display:flex;gap:5px;flex-shrink:0}
     button{
@@ -48,19 +47,13 @@
     button:hover{opacity:.85} button:active{transform:scale(.97)}
     .btn-inc{background:#1a73e8;color:#fff}
     .btn-exc{background:#d93025;color:#fff}
-    .btn-neu{background:#757575;color:#fff}
     .btn-clr{background:#fff;color:#5f6368;border:1px solid #dadce0}
 
     .prog-wrap{background:#e8eaed;border-radius:3px;height:3px;flex-shrink:0}
     .prog-bar{height:100%;border-radius:3px;width:0%;transition:width .3s}
-    .pb-blue{background:#1a73e8}.pb-red{background:#d93025}.pb-gray{background:#9e9e9e}
+    .pb-blue{background:#1a73e8}.pb-red{background:#d93025}
     .status{font-size:11px;color:#5f6368;min-height:14px;flex-shrink:0;max-height:130px;overflow-y:auto}
     .status b{color:#202124}
-
-    /* ── Legend ───────────────────────────────────────────────── */
-    #legend{padding:9px 11px;border-top:1px solid #e8eaed;font-size:10.5px;color:#80868b;line-height:1.9;flex-shrink:0}
-    .leg{display:flex;align-items:center;gap:5px}
-    .sw{width:14px;height:9px;border-radius:2px;flex-shrink:0}
 
     /* ── Map ──────────────────────────────────────────────────── */
     #map{flex:1}
@@ -82,7 +75,6 @@
     .tb-r{background:#fff3f3;color:#c62828}.tb-r:hover{background:#fce8e6}
     .tb-b{background:#e8f0fe;color:#1558b0}.tb-b:hover{background:#d2e3fc}
     .tb-g{background:#f8f9fa;color:#5f6368}.tb-g:hover{background:#f1f3f4}
-    .tb-p{background:#fce4ec;color:#880e4f}.tb-p:hover{background:#f8bbd0}
 
     .leaflet-tooltip{
       background:#1a73e8;border:none;color:#fff;font-weight:700;
@@ -91,8 +83,6 @@
       white-space:normal;line-height:1.5;min-width:160px;max-width:260px
     }
     .leaflet-tooltip.rt{background:#c62828}
-    .leaflet-tooltip.nt{background:#616161}
-    .leaflet-tooltip.pt{background:#880e4f}
     .leaflet-tooltip.hover-tip{background:#37474f;font-size:12px;padding:5px 10px;line-height:1.5;font-weight:400}
     .leaflet-tooltip.hover-tip b{font-weight:700}
     .leaflet-tooltip::before{display:none}
@@ -116,10 +106,13 @@
     .show-all-ctrl .type-btn:hover{background:#f8f9fa}
     .show-all-ctrl .type-btn.active{background:#ff6d00;color:#fff;border-color:#ff6d00}
 
-    /* ── Marked items panel ───────────────────────────────────── */
-    .marked-item{display:flex;justify-content:space-between;align-items:baseline;
+    /* ── Marked / change-log items panel ─────────────────────── */
+    .marked-item{display:flex;align-items:baseline;gap:0;
       padding:1px 0;line-height:1.65;color:#880e4f}
-    .marked-del{cursor:pointer;color:#e91e63;font-weight:700;padding:0 2px;flex-shrink:0;margin-left:4px}
+    .marked-item .bullet{user-select:none;-webkit-user-select:none;margin-right:4px;flex-shrink:0}
+    .marked-item .track-name{flex:1;word-break:break-word}
+    .marked-del{cursor:pointer;color:#e91e63;font-weight:700;padding:0 2px;flex-shrink:0;margin-left:4px;
+      user-select:none;-webkit-user-select:none}
     .marked-del:hover{color:#880e4f}
   </style>
 </head>
@@ -135,7 +128,7 @@
       <button class="btn-clr" onclick="clearIncluded()">✕</button>
     </div>
     <div class="prog-wrap"><div class="prog-bar pb-blue" id="iProg"></div></div>
-    <div class="status" id="iStat">Готов</div>
+    <div class="status" id="iStat"></div>
   </div>
 
   <div class="panel">
@@ -146,11 +139,11 @@
       <button class="btn-clr" onclick="clearExcluded()">✕</button>
     </div>
     <div class="prog-wrap"><div class="prog-bar pb-red" id="eProg"></div></div>
-    <div class="status" id="eStat">Готов</div>
+    <div class="status" id="eStat"></div>
     <button id="bulkExcludeBtn" onclick="bulkAddRemainingToExcluded()"
-      style="margin-top:6px;width:100%;background:#fff;border:2px solid #d93025;color:#d93025;
-             border-radius:6px;padding:7px 10px;font-size:11.5px;font-weight:600;cursor:pointer">
-      🌐 Добавить всё оставшееся по США в исключения
+      style="margin-top:6px;width:auto;display:inline-block;background:#fff;border:1.5px solid #d93025;color:#d93025;
+             border-radius:5px;padding:4px 8px;font-size:10px;font-weight:600;cursor:pointer">
+      🌐 Добавить всё оставшееся в исключения
     </button>
   </div>
 
@@ -160,46 +153,30 @@
     <div class="btn-row"><button class="btn-clr" onclick="$('bulkResultPanel').style.display='none'">✕ Закрыть</button></div>
   </div>
 
-  <div class="panel">
-    <div class="panel-title"><span class="dot dot-gray"></span>Neutral areas</div>
-    <textarea id="neuInput" placeholder="ZIP, штат, округ, страна:&#10;16112, Pennsylvania&#10;Allegheny County, PA&#10;Texas&#10;France"></textarea>
-    <div class="btn-row">
-      <button class="btn-neu" onclick="loadNeutral()">▶ Показать</button>
-      <button class="btn-clr" onclick="clearNeutral()">✕</button>
-    </div>
-    <div class="prog-wrap"><div class="prog-bar pb-gray" id="nProg"></div></div>
-    <div class="status" id="nStat">Готов</div>
+  <div id="addedIncPanel" class="panel" style="display:none;flex-shrink:0;max-height:200px">
+    <div class="panel-title"><span class="dot dot-blue"></span>Добавлено в Включить</div>
+    <div id="addedIncList" style="font-size:10.5px;color:#1558b0;overflow-y:auto;flex:1;min-height:24px"></div>
+    <div class="btn-row"><button class="btn-clr" onclick="clearAddedInc()">✕ Очистить</button></div>
   </div>
 
-  <div id="markedPanel" class="panel" style="display:none;flex-shrink:0;max-height:220px">
-    <div class="panel-title"><span class="dot dot-pink"></span>Отмечены для исключения</div>
-    <div id="markedList" style="font-size:10.5px;overflow-y:auto;flex:1;min-height:24px;padding:2px 0"></div>
-    <div class="btn-row">
-      <button class="btn-exc" onclick="applyMarkedToExcluded()" style="background:#e91e63">→ В исключения</button>
-      <button class="btn-clr" onclick="clearAllMarked()">✕</button>
-    </div>
+  <div id="addedExcPanel" class="panel" style="display:none;flex-shrink:0;max-height:200px">
+    <div class="panel-title"><span class="dot dot-red"></span>Добавлено в Исключить</div>
+    <div id="addedExcList" style="font-size:10.5px;color:#c62828;overflow-y:auto;flex:1;min-height:24px"></div>
+    <div class="btn-row"><button class="btn-clr" onclick="clearAddedExc()">✕ Очистить</button></div>
   </div>
 
   <div id="removedIncPanel" class="panel" style="display:none;flex-shrink:0;max-height:160px">
-    <div class="panel-title"><span class="dot dot-blue"></span>Убраны из включённых</div>
+    <div class="panel-title"><span class="dot dot-blue"></span>Убрано из Включить</div>
     <div id="removedIncList" style="font-size:10.5px;color:#1558b0;overflow-y:auto;flex:1;min-height:24px;line-height:1.7"></div>
     <div class="btn-row"><button class="btn-clr" onclick="clearRemovedInc()">✕ Очистить</button></div>
   </div>
 
   <div id="removedPanel" class="panel" style="display:none;flex-shrink:0;max-height:160px">
-    <div class="panel-title"><span class="dot" style="background:#34a853"></span>Убраны из исключений</div>
+    <div class="panel-title"><span class="dot" style="background:#34a853"></span>Убрано из Исключить</div>
     <div id="removedList" style="font-size:10.5px;color:#1e7e34;overflow-y:auto;flex:1;min-height:24px;line-height:1.7"></div>
     <div class="btn-row"><button class="btn-clr" onclick="clearRemoved()">✕ Очистить</button></div>
   </div>
 
-  <div id="legend">
-    <div class="leg"><span class="sw" style="background:rgba(26,115,232,.22);border:1.5px solid #1a73e8"></span>Включённые ZIP</div>
-    <div class="leg"><span class="sw" style="background:rgba(198,40,40,.28);border:1.5px solid #d93025"></span>Исключённые зоны</div>
-    <div class="leg"><span class="sw" style="background:rgba(52,168,83,.6);border:2px solid #0a6b2e"></span>Пересечение включ. и исключ.</div>
-    <div class="leg"><span class="sw" style="background:rgba(158,158,158,.22);border:1.5px solid #757575"></span>Нейтральные зоны</div>
-    <div class="leg"><span class="sw" style="background:rgba(233,30,99,.28);border:1.5px solid #e91e63"></span>Отмечены для исключения</div>
-    <div style="margin-top:3px;font-size:10px">Правый клик по зоне → меню</div>
-  </div>
 </div>
 
 <div id="map"></div>
@@ -294,25 +271,19 @@ map.createPane('allAreasPane');
 map.getPane('allAreasPane').style.zIndex = 300; // under hoverPane — the light "all zones in view" backdrop
 const incLayer     = L.featureGroup().addTo(map);
 const excLayer     = L.featureGroup().addTo(map);
-const neuLayer     = L.featureGroup().addTo(map);
-const markedLayer  = L.featureGroup().addTo(map); // pink "marked as excluded"
 const overlapLayer = L.featureGroup().addTo(map); // green intersection, on top
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const exclusions   = new Map();   // key → {name, lyr}
-const zipCtxCache  = new Map();   // zip → context object
 let   serverStatus = null;
 const removedItems    = [];
 const removedIncItems = [];
 const incLayers       = new Map(); // raw → L.geoJSON group (for direct removal)
-const neuLayers       = new Map();
-const markedItems     = new Map(); // key → {name, lyr}
 let   _hideTipTimer = null;
 let   _activeLayer  = null;
 let   _activeStyle  = null;
 let   _incGen = 0;   // incremented on clear — aborts in-flight loadIncluded
 let   _excGen = 0;   // incremented on clear — aborts in-flight loadExcluded
-let   _neuGen = 0;   // incremented on clear — aborts in-flight loadNeutral
 
 // ── Nominatim serial queue — guarantees 1.2s between requests, race-condition-free ──
 // All concurrent callers chain onto _nomMutex; each call runs only after the previous finishes.
@@ -586,10 +557,6 @@ const SIH = {color:'#1558b0',fillColor:'#1a73e8',fillOpacity:.5,weight:2.5};
 const SE  = {color:'#d93025',fillColor:'#c62828',fillOpacity:.28,weight:1.5};
 const SEH = {color:'#b71c1c',fillColor:'#c62828',fillOpacity:.55,weight:2.5};
 const SO  = {color:'#0a6b2e',fillColor:'#34a853',fillOpacity:.55,weight:2};  // overlap
-const SN  = {color:'#757575',fillColor:'#9e9e9e',fillOpacity:.2,weight:1.5};
-const SNH = {color:'#424242',fillColor:'#757575',fillOpacity:.5,weight:2.5};
-const SM  = {color:'#e91e63',fillColor:'#f48fb1',fillOpacity:.35,weight:1.5};
-const SMH = {color:'#ad1457',fillColor:'#f06292',fillOpacity:.55,weight:2.5};
 const SHov= {color:'#ff6d00',fillColor:'#ff6d00',fillOpacity:.08,weight:2,dashArray:'6 4'};
 
 // ── Build included layer ──────────────────────────────────────────────────────
@@ -599,6 +566,7 @@ function buildIncLayer(fc){
     onEachFeature(feat,lyr){
       const p   = feat.properties;
       const zip = p.ZCTA5CE20 || p.zip;
+      const raw = p._raw || '';
       const label = (p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '')) + (p.approx ? ' (прибл. граница)' : '');
       lyr.bindTooltip(label, {sticky:true,offset:[10,0]});
 
@@ -630,24 +598,11 @@ function buildIncLayer(fc){
         } catch(_) {}
       });
 
-      lyr.on('contextmenu', async function(e){
-        L.DomEvent.preventDefault(e.originalEvent||e);
-        setActiveLayer(this, this.options.style||SI);
-        this.setStyle(SIH); this.bringToFront();
-        if (zip) {
-          showTip(e, `ZIP ${zip}`, '<i>определяю округ…</i>', buildIncActions(zip,null));
-          const ctx = await loadZipCtx(zip, lyr.getBounds());
-          showTip(e, `ZIP ${zip}`, ctx?formatLoc(ctx):'', buildIncActions(zip,ctx));
-        } else {
-          const rawLine = p._raw || '';
-          const removeBtn = rawLine
-            ? `<button class="tb tb-b" onclick="removeInclusion('${esc(rawLine)}')">✅ Убрать из включённых</button>`
-            : '';
-          showTip(e,
-            `<span style="color:#1a73e8">${label}</span>`,
-            'Включённая зона',
-            `${removeBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
-        }
+      lyr.on('click', function(e){
+        if (drawMode) return;
+        L.DomEvent.stopPropagation(e);
+        if (bulkModeOn) { bulkToggleZone('inc', lyrGroup, this, raw, label); return; }
+        _zoneMenu(e, 'inc', lyrGroup, this, raw, label);
       });
     }
   });
@@ -656,59 +611,6 @@ function buildIncLayer(fc){
     if (raw) incLayers.set(raw, lyrGroup);
   });
   return lyrGroup;
-}
-
-function buildIncActions(zip, ctx){
-  const a = [`<button class="tb tb-r" onclick="excludeAsZip('${zip}','${esc(ctx?.state_abbr||'')}','${esc(ctx?.state_name||'')}')">🚫 Исключить ZIP ${zip}</button>`];
-  if(ctx?.county_name)
-    a.push(`<button class="tb tb-r" onclick="excludeAsCounty('${esc(ctx.county_fips||'')}','${esc(ctx.county_name)}','${esc(ctx.state_abbr||'')}','${esc(ctx.state_name||'')}')">🚫 Исключить County: ${ctx.county_name}</button>`);
-  if(ctx?.state_name)
-    a.push(`<button class="tb tb-r" onclick="excludeAsState('${esc(ctx.state_fips||'')}','${esc(ctx.state_name)}','${esc(ctx.state_abbr||'')}')">🚫 Исключить State: ${ctx.state_name}</button>`);
-  a.push(`<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
-  return a.join('');
-}
-
-function formatLoc(ctx){
-  const parts=[];
-  if(ctx.county_name) parts.push(ctx.county_name);
-  if(ctx.state_abbr)  parts.push(ctx.state_abbr);
-  return parts.join(', ');
-}
-
-// ── ZIP context lookup ────────────────────────────────────────────────────────
-async function loadZipCtx(zip, bounds){
-  if(zipCtxCache.has(zip)) return zipCtxCache.get(zip);
-  const st = await getServerStatus();
-
-  let ctx = null;
-  if(st.has_counties){
-    try{
-      const r = await fetch(`/api/zip-context?zip=${zip}`);
-      ctx = await r.json();
-    }catch{}
-  }
-
-  // Fallback: Nominatim reverse geocode
-  if(!ctx?.county_name){
-    try{
-      const c = bounds.getCenter();
-      const rev = await nominatim(`/reverse?lat=${c.lat}&lon=${c.lng}&format=json&addressdetails=1&zoom=10`);
-      const a = rev.address||{};
-      const sc = (a['ISO3166-2-lvl4']||'').replace(/^US-/,'');
-      ctx = {
-        county_name: a.county||a.city_district||'',
-        state_name:  a.state||'',
-        state_abbr:  sc||a.state_code||'',
-        county_fips: null, state_fips: null,
-        _nominatim_county: a.county||a.city_district||'',
-        _nominatim_state:  a.state||'',
-        _state_abbr:       sc
-      };
-    }catch{}
-  }
-
-  if(ctx) zipCtxCache.set(zip, ctx);
-  return ctx;
 }
 
 // ── Build excluded layer ──────────────────────────────────────────────────────
@@ -743,20 +645,272 @@ function buildExcLayer(fc, key){
           if (tip) tip.setContent(labels.length > 1 ? labels.join(' | ') : name);
         } catch(_) {}
       });
-      lyr.on('contextmenu', function(e){
-        L.DomEvent.preventDefault(e.originalEvent||e);
-        setActiveLayer(this, SE);
-        this.setStyle(SEH); this.bringToFront();
-        showTip(e,
-          `<span style="color:#c62828">${name}</span>`,
-          'Исключённая зона',
-          `<button class="tb tb-b" onclick="removeExclusion('${esc(key)}')">✅ Убрать из исключений</button>
-           <button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`
-        );
+      lyr.on('click', function(e){
+        if (drawMode) return;
+        L.DomEvent.stopPropagation(e);
+        if (bulkModeOn) { bulkToggleZone('exc', lyrGroup, this, key, name); return; }
+        _zoneMenu(e, 'exc', lyrGroup, this, key, name);
       });
     }
   });
   return lyrGroup;
+}
+
+// ── Zone action menu (single click on an Included/Excluded zone) ──────────────
+const SBulk = {color:'#ff6d00', fillColor:'#ffab40', fillOpacity:.55, weight:3, dashArray:'4 3'};
+
+function _currentStyle(lyr, fallback){
+  return (lyr.options && lyr.options.fillColor === SO.fillColor) ? SO : fallback;
+}
+
+// Geometric "is this feature also covered by the other side?" — needed because
+// Included/Excluded are independent lists (keyed differently) and can overlap
+// partially (e.g. a whole included county with one excluded ZIP carved out).
+function _findOverlappingExcludedKey(feature){
+  if (!window.turf || !feature?.geometry) return null;
+  const fb = turf.bbox(feature);
+  for (const [key, item] of exclusions.entries()) {
+    const ef = item.lyr.toGeoJSON();
+    const feats = ef.features || [ef];
+    for (const ef2 of feats) {
+      if (!ef2.geometry) continue;
+      const eb = turf.bbox(ef2);
+      if (fb[0]>eb[2]||fb[2]<eb[0]||fb[1]>eb[3]||fb[3]<eb[1]) continue;
+      try { if (turf.intersect(turf.feature(feature.geometry), turf.feature(ef2.geometry))) return key; } catch(_){}
+    }
+  }
+  return null;
+}
+
+function _findOverlappingIncluded(feature){
+  if (!window.turf || !feature?.geometry) return null;
+  const fb = turf.bbox(feature);
+  let found = null;
+  incLayer.eachLayer(grp => {
+    if (found) return;
+    const inner = [];
+    if (grp.eachLayer) grp.eachLayer(l => inner.push(l)); else inner.push(grp);
+    for (const l of inner) {
+      if (found || !l.feature?.geometry) continue;
+      const ib = turf.bbox(l.feature);
+      if (fb[0]>ib[2]||fb[2]<ib[0]||fb[1]>ib[3]||fb[3]<ib[1]) continue;
+      try {
+        if (turf.intersect(turf.feature(feature.geometry), turf.feature(l.feature.geometry))) {
+          found = { lyrGroup: grp, lyr: l, raw: l.feature.properties?._raw || '' };
+        }
+      } catch(_) {}
+    }
+  });
+  return found;
+}
+
+const _pendingZone = new Map();
+let   _pendingZoneId = 0;
+
+function _zoneMenu(e, side, lyrGroup, lyr, ident, label){
+  const feat = lyr.toGeoJSON();
+  let isInc, isExc, incRef, excKey;
+  if (side === 'inc') {
+    isInc = true;
+    excKey = _findOverlappingExcludedKey(feat);
+    isExc = !!excKey;
+  } else {
+    isExc = true;
+    incRef = _findOverlappingIncluded(feat);
+    isInc = !!incRef;
+  }
+
+  const id = ++_pendingZoneId;
+  _pendingZone.set(id, {side, lyrGroup, lyr, ident, feat, isInc, isExc, incRef, excKey});
+
+  setActiveLayer(lyr, side === 'inc' ? (isExc ? SO : SI) : SE);
+  lyr.setStyle(side === 'inc' ? SIH : SEH);
+  lyr.bringToFront();
+
+  const both = isInc && isExc;
+  const order = both ? ['addInc','addExc','rmInc','rmExc']
+              : side === 'inc' ? ['rmInc','addExc']
+              : ['rmExc','addInc'];
+  const BTN = {
+    addInc: `<button class="tb tb-b" onclick="zoneAction(${id},'addInc')">Добавить в included</button>`,
+    addExc: `<button class="tb tb-r" onclick="zoneAction(${id},'addExc')">Добавить в excluded</button>`,
+    rmInc:  `<button class="tb tb-g" onclick="zoneAction(${id},'rmInc')">Убрать из included</button>`,
+    rmExc:  `<button class="tb tb-g" onclick="zoneAction(${id},'rmExc')">Убрать из excluded</button>`,
+  };
+
+  showTip(e, label, '', order.map(k => BTN[k]).join(''));
+}
+
+function zoneAction(id, action){
+  const z = _pendingZone.get(id);
+  hideTipNow();
+  if (!z) return;
+  if (action === 'rmInc') {
+    if (z.side === 'inc') _clearInc(z.lyrGroup, z.lyr, z.ident);
+    else if (z.incRef) _clearInc(z.incRef.lyrGroup, z.incRef.lyr, z.incRef.raw);
+  } else if (action === 'rmExc') {
+    const key = z.side === 'exc' ? z.ident : z.excKey;
+    if (key) removeExclusion(key);
+  } else if (action === 'addExc') {
+    const name = z.feat.properties?.display_name || z.ident || 'zone';
+    _addToExcluded(z.feat, name);
+  } else if (action === 'addInc') {
+    const name = z.side === 'exc' ? (exclusions.get(z.ident)?.name || z.feat.properties?.display_name || 'zone') : z.ident;
+    _addToIncluded(z.feat, name);
+  }
+  scheduleOverlap();
+}
+
+// ── Core primitives shared by the single-zone menu and bulk actions ───────────
+function _clearInc(lyrGroup, lyr, raw){
+  lyrGroup.removeLayer(lyr);
+  if (raw) {
+    incLayers.delete(raw);
+    const ta = $('incInput');
+    ta.value = ta.value.split('\n').filter(l => l.trim() !== raw.trim() && l.trim() !== '').join('\n');
+    logRemovedInc(raw);
+  }
+}
+
+function _addToExcluded(feat, name){
+  const clone = JSON.parse(JSON.stringify(feat));
+  clone.properties = clone.properties || {};
+  clone.properties.display_name = name;
+  addExclusion(`raw:${name}`, name, {type:'FeatureCollection', features:[clone]});
+  appendExcTA(name);
+  logAddedExc(name);
+}
+
+function _addToIncluded(feat, raw){
+  const clone = JSON.parse(JSON.stringify(feat));
+  addInclusion(raw, {type:'FeatureCollection', features:[clone]});
+  logAddedInc(raw);
+}
+
+function appendIncTA(line){
+  const ta=$('incInput'), v=ta.value.trim();
+  const lines = v?v.split('\n'):[];
+  if(!lines.some(l=>l.trim()===line.trim())) ta.value=(v?v+'\n':'')+line;
+}
+
+function addInclusion(raw, fc){
+  if (incLayers.has(raw)) return;
+  fc.features?.forEach(f => { f.properties = f.properties||{}; f.properties._raw = raw; });
+  buildIncLayer(fc).addTo(incLayer);
+  appendIncTA(raw);
+}
+
+// ── Bulk (Shift+click) selection ───────────────────────────────────────────────
+let bulkModeOn = false;
+const bulkSelection = new Map(); // "side:ident" → {side, lyrGroup, lyr, ident, label}
+
+document.addEventListener('keydown', e => { if (e.key === 'Shift') bulkModeOn = true; });
+document.addEventListener('keyup', e => {
+  if (e.key !== 'Shift') return;
+  bulkModeOn = false;
+  if (bulkSelection.size) _showBulkMenu();
+});
+window.addEventListener('blur', () => { bulkModeOn = false; });
+
+function bulkToggleZone(side, lyrGroup, lyr, ident, label){
+  const k = `${side}:${ident}`;
+  if (bulkSelection.has(k)) {
+    bulkSelection.delete(k);
+    lyr.setStyle(side === 'inc' ? _currentStyle(lyr, SI) : SE);
+  } else {
+    bulkSelection.set(k, {side, lyrGroup, lyr, ident, label});
+    lyr.setStyle(SBulk);
+  }
+  lyr.bringToFront();
+}
+
+function _showBulkMenu(){
+  const items = [...bulkSelection.values()];
+  if (!items.length) return;
+  const incItems = items.filter(i => i.side === 'inc');
+  const excItems = items.filter(i => i.side === 'exc');
+  const btns = [];
+  if (incItems.length) {
+    btns.push(`<button class="tb tb-g" onclick="bulkApply('rmInc')">Убрать из included (${incItems.length})</button>`);
+    btns.push(`<button class="tb tb-r" onclick="bulkApply('addExc')">Добавить в excluded (${incItems.length})</button>`);
+  }
+  if (excItems.length) {
+    btns.push(`<button class="tb tb-g" onclick="bulkApply('rmExc')">Убрать из excluded (${excItems.length})</button>`);
+    btns.push(`<button class="tb tb-b" onclick="bulkApply('addInc')">Добавить в included (${excItems.length})</button>`);
+  }
+  btns.push(`<button class="tb tb-g" onclick="bulkCancel()">✕ Отмена (${items.length})</button>`);
+  const last = items[items.length - 1];
+  const c = last.lyr.getBounds ? last.lyr.getBounds().getCenter() : map.getCenter();
+  const pt = map.latLngToContainerPoint(c);
+  const box = map.getContainer().getBoundingClientRect();
+  showTip({clientX: box.left + pt.x, clientY: box.top + pt.y},
+    `Выделено зон: ${items.length}`, '', btns.join(''));
+}
+
+function bulkApply(action){
+  hideTipNow();
+  const items = [...bulkSelection.values()];
+  for (const it of items) {
+    if (action === 'rmInc'  && it.side === 'inc') _clearInc(it.lyrGroup, it.lyr, it.ident);
+    if (action === 'addExc' && it.side === 'inc') _addToExcluded(it.lyr.toGeoJSON(), it.ident);
+    if (action === 'rmExc'  && it.side === 'exc') removeExclusion(it.ident);
+    if (action === 'addInc' && it.side === 'exc') _addToIncluded(it.lyr.toGeoJSON(), exclusions.get(it.ident)?.name || it.label);
+  }
+  bulkSelection.clear();
+  scheduleOverlap();
+}
+
+function bulkCancel(){
+  hideTipNow();
+  for (const it of bulkSelection.values()) it.lyr.setStyle(it.side === 'inc' ? _currentStyle(it.lyr, SI) : SE);
+  bulkSelection.clear();
+}
+
+// ── Change-log lists: Добавлено/Убрано в Включить/Исключить ───────────────────
+const addedIncItems   = [];
+const addedExcItems   = [];
+
+function _renderTrackList(elId, arr){
+  $(elId).innerHTML = arr.map((s,i) =>
+    `<div class="marked-item"><span class="bullet">•</span><span class="track-name">${s}</span><span class="marked-del" onclick="_removeTrackItem('${elId}',${i})">✕</span></div>`
+  ).join('');
+}
+
+const _TRACK_ARR   = () => ({ addedIncList: addedIncItems, addedExcList: addedExcItems,
+                               removedIncList: removedIncItems, removedList: removedItems });
+const _TRACK_PANEL = { addedIncList:'addedIncPanel', addedExcList:'addedExcPanel',
+                       removedIncList:'removedIncPanel', removedList:'removedPanel' };
+
+function _removeTrackItem(listId, idx){
+  const arr = _TRACK_ARR()[listId];
+  if (!arr) return;
+  arr.splice(idx, 1);
+  _renderTrackList(listId, arr);
+  if (!arr.length) $(_TRACK_PANEL[listId]).style.display = 'none';
+}
+
+function logAddedInc(name){
+  addedIncItems.push(name);
+  _renderTrackList('addedIncList', addedIncItems);
+  $('addedIncPanel').style.display = '';
+}
+function logAddedExc(name){
+  addedExcItems.push(name);
+  _renderTrackList('addedExcList', addedExcItems);
+  $('addedExcPanel').style.display = '';
+}
+function clearAddedInc(){ addedIncItems.length = 0; $('addedIncList').innerHTML=''; $('addedIncPanel').style.display='none'; }
+function clearAddedExc(){ addedExcItems.length = 0; $('addedExcList').innerHTML=''; $('addedExcPanel').style.display='none'; }
+
+function logRemovedInc(raw){
+  removedIncItems.push(raw);
+  _renderTrackList('removedIncList', removedIncItems);
+  $('removedIncPanel').style.display = '';
+}
+function logRemovedExc(name){
+  removedItems.push(name);
+  _renderTrackList('removedList', removedItems);
+  $('removedPanel').style.display = '';
 }
 
 // ── Show All Areas — state & hover vars ──────────────────────────────────────
@@ -825,7 +979,165 @@ _showAllCtrl.onAdd = function() {
 };
 _showAllCtrl.addTo(map);
 
+// ── Freehand polygon zone-import tool ──────────────────────────────────────
+// Draw an arbitrary closed shape on the map; on close, ask ZIP-коды vs
+// Округа (Counties) and Included vs Excluded, then fetch every zone of that
+// type whose centroid falls inside the drawn shape and add them all at once.
+const _drawCtrl = L.control({position:'topleft'});
+_drawCtrl.onAdd = function(){
+  const d = L.DomUtil.create('div', 'show-all-ctrl');
+  d.innerHTML = `
+    <button id="drawModeBtn" onclick="toggleDrawMode()">✏️ Нарисовать зону</button>
+    <button id="drawFinishBtn" onclick="_finishDraw()" style="display:none;margin-top:6px;background:#1a73e8;color:#fff;border-color:#1a73e8">✓ Замкнуть контур</button>
+    <div id="drawHint" style="display:none;font-size:10.5px;color:#5f6368;margin-top:6px;max-width:190px;line-height:1.5">Кликайте по карте — ставите точки контура. Кликните рядом с первой точкой или нажмите «Замкнуть».</div>`;
+  L.DomEvent.disableClickPropagation(d);
+  L.DomEvent.disableScrollPropagation(d);
+  return d;
+};
+_drawCtrl.addTo(map);
+
+let drawMode         = false;
+let drawPoints       = [];
+let drawLine         = null;
+let drawStartMarker  = null;
+const DRAW_CLOSE_PX  = 12;
+
+function toggleDrawMode(){
+  if (drawMode) { _cancelDraw(); return; }
+  if (showAllMode) toggleShowAll();
+  drawMode = true;
+  map.doubleClickZoom.disable();
+  map.getContainer().style.cursor = 'crosshair';
+  _updateDrawCtrl();
+}
+
+function _cancelDraw(){
+  drawMode = false;
+  drawPoints = [];
+  if (drawLine) { map.removeLayer(drawLine); drawLine = null; }
+  if (drawStartMarker) { map.removeLayer(drawStartMarker); drawStartMarker = null; }
+  map.doubleClickZoom.enable();
+  map.getContainer().style.cursor = '';
+  _updateDrawCtrl();
+}
+
+function _updateDrawCtrl(){
+  const btn = $('drawModeBtn');
+  btn.classList.toggle('active', drawMode);
+  btn.textContent = drawMode ? '✕ Отменить рисование' : '✏️ Нарисовать зону';
+  $('drawHint').style.display = drawMode ? '' : 'none';
+  $('drawFinishBtn').style.display = (drawMode && drawPoints.length >= 3) ? '' : 'none';
+}
+
+map.on('click', function(e){
+  if (!drawMode) return;
+  if (drawPoints.length >= 3) {
+    const p0 = map.latLngToContainerPoint(drawPoints[0]);
+    const p1 = map.latLngToContainerPoint(e.latlng);
+    if (p0.distanceTo(p1) <= DRAW_CLOSE_PX) { _finishDraw(); return; }
+  }
+  drawPoints.push(e.latlng);
+  if (drawPoints.length === 1) {
+    drawStartMarker = L.circleMarker(e.latlng, {radius:6, color:'#ff6d00', fillColor:'#ff6d00', fillOpacity:1, weight:2}).addTo(map);
+  }
+  if (drawLine) map.removeLayer(drawLine);
+  drawLine = L.polyline(drawPoints, {color:'#ff6d00', weight:3, dashArray:'6 4'}).addTo(map);
+  _updateDrawCtrl();
+});
+
+function _finishDraw(){
+  if (drawPoints.length < 3) return;
+  const ring = drawPoints.map(p => [p.lng, p.lat]);
+  ring.push(ring[0]);
+  const polygon = {type:'Polygon', coordinates:[ring]};
+  _cancelDraw();
+  _promptDrawImport(polygon);
+}
+
+let _pendingDrawPolygon = null;
+let _pendingDrawAt      = null;
+
+function _promptDrawImport(polygon){
+  const bounds = L.geoJSON(polygon).getBounds();
+  const pt  = map.latLngToContainerPoint(bounds.getCenter());
+  const box = map.getContainer().getBoundingClientRect();
+  _pendingDrawPolygon = polygon;
+  _pendingDrawAt = {clientX: box.left + pt.x, clientY: box.top + pt.y};
+
+  showTip(_pendingDrawAt, 'Нарисованная зона', 'Что искать внутри контура?',
+    `<button class="tb tb-b" onclick="_drawPickMode('zip')">ZIP-коды</button>
+     <button class="tb tb-r" onclick="_drawPickMode('county')">Округа (Counties)</button>
+     <button class="tb tb-g" onclick="hideTipNow()">✕ Отмена</button>`);
+}
+
+function _drawPickMode(mode){
+  showTip(_pendingDrawAt, 'Нарисованная зона', mode === 'zip' ? 'ZIP-коды' : 'Округа',
+    `<button class="tb tb-b" onclick="_drawPickTarget('${mode}','inc')">Добавить в included</button>
+     <button class="tb tb-r" onclick="_drawPickTarget('${mode}','exc')">Добавить в excluded</button>
+     <button class="tb tb-g" onclick="hideTipNow()">✕ Отмена</button>`);
+}
+
+async function _drawPickTarget(mode, target){
+  const polygon = _pendingDrawPolygon;
+  showTip(_pendingDrawAt, 'Нарисованная зона', '<i>ищу зоны внутри контура…</i>', '');
+  if (!polygon) { hideTipNow(); return; }
+  let names = [];
+  try { names = await _zonesInPolygon(polygon, mode); }
+  catch(e) { console.error(e); }
+  hideTipNow();
+  if (!names.length) { alert('Внутри нарисованного контура ничего не найдено.'); return; }
+  const ta = $(target === 'inc' ? 'incInput' : 'excInput');
+  const existing = ta.value.trim();
+  ta.value = existing ? existing + '\n' + names.join('\n') : names.join('\n');
+  if (target === 'inc') loadIncluded(); else loadExcluded();
+}
+
+// A zone counts as "in the drawn shape" once at least half of its own area
+// falls inside it — generous on purpose, so a rough freehand outline still
+// picks up zones it clearly covers even if a sliver pokes outside.
+const DRAW_OVERLAP_RATIO = 0.5;
+
+async function _zonesInPolygon(polygon, mode){
+  const bounds = L.geoJSON(polygon).getBounds();
+  const params = new URLSearchParams({
+    min_lat: bounds.getSouth(), max_lat: bounds.getNorth(),
+    min_lon: bounds.getWest(),  max_lon: bounds.getEast(),
+    mode, limit: '3000'
+  });
+  const res  = await fetch(`/api/area-all?${params}`);
+  const data = await res.json();
+  const feats = data?.fc?.features || [];
+  const turfPoly = turf.feature(polygon);
+  const polyBbox = turf.bbox(turfPoly);
+  const names = [];
+  for (const f of feats) {
+    if (!f.geometry) continue;
+    let hit = false;
+    try {
+      const fb = turf.bbox(f);
+      if (fb[0]>polyBbox[2]||fb[2]<polyBbox[0]||fb[1]>polyBbox[3]||fb[3]<polyBbox[1]) {
+        hit = false;
+      } else {
+        const zoneFeat = turf.feature(f.geometry);
+        const totalArea = turf.area(zoneFeat);
+        if (totalArea > 0) {
+          const inter = turf.intersect(zoneFeat, turfPoly);
+          hit = !!inter && (turf.area(inter) / totalArea) >= DRAW_OVERLAP_RATIO;
+        }
+      }
+    } catch(_) {
+      // Self-intersecting hand-drawn shapes can trip turf.intersect — fall
+      // back to a simple centroid test rather than silently dropping the zone.
+      try { hit = turf.booleanPointInPolygon(turf.centroid(f), turfPoly); } catch(_) {}
+    }
+    if (!hit) continue;
+    names.push(mode === 'zip' ? (f.properties.region_id || f.properties.zip) : f.properties.display_name);
+  }
+  return names.filter(Boolean);
+}
+
 async function toggleShowAll() {
+  if (drawMode) _cancelDraw();
   showAllMode = !showAllMode;
   if (showAllMode) map.doubleClickZoom.disable();
   else { map.doubleClickZoom.enable(); _clearHover(); }
@@ -1010,279 +1322,80 @@ async function _fetchAreaAt(lat, lon) {
   } catch { return null; }
 }
 
+function _areaBtns(type, id, label){
+  return `<button class="tb tb-b" onclick="addShowAllArea('${type}',${id},'inc')">➕ ${label} → included</button>
+          <button class="tb tb-r" onclick="addShowAllArea('${type}',${id},'exc')">➕ ${label} → excluded</button>`;
+}
+
 function _showAreaMenu(e, data) {
   const id = ++_pendingAreaId;
   _pendingAreaData.set(id, data);
 
   if (showAllType === 'zip') {
-    const zk = `mark:zip:${data.zip}`;
-    const zBtn = markedItems.has(zk)
-      ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ZIP ${data.zip} уже отмечен</div>`
-      : `<button class="tb tb-p" onclick="markArea('zip',${id})">📍 ZIP ${data.zip}</button>`;
-    showTip(e, '➕ Добавить в исключения', '',
-      `${zBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+    showTip(e, `ZIP ${data.zip}`, '',
+      `${_areaBtns('zip', id, `ZIP ${data.zip}`)}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
     return;
   }
 
   if (showAllType === 'cd') {
     const cdLabel = `${data.cd_state_name || data.cd_state_abbr}'s ${_ordinal(data.cd_fp)} Congressional District`;
-    const cdk = `mark:cd:${data.cd_state_fips}:${data.cd_fp}`;
-    const cdBtn = markedItems.has(cdk)
-      ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${cdLabel} уже отмечен</div>`
-      : `<button class="tb tb-p" onclick="markArea('cd',${id})">📍 ${cdLabel}</button>`;
-    const sk = `mark:state:${data.state_fips}`;
-    const sBtn = data.state_name
-      ? (markedItems.has(sk)
-          ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.state_name} уже отмечен</div>`
-          : `<button class="tb tb-p" onclick="markArea('state',${id})">📍 ${data.state_name}</button>`)
-      : '';
-    showTip(e, '➕ Добавить в исключения', '',
-      `${cdBtn}${sBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+    let html = _areaBtns('cd', id, cdLabel);
+    if (data.state_name) html += _areaBtns('state', id, data.state_name);
+    showTip(e, cdLabel, '', `${html}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
     return;
   }
 
   if (showAllType === 'province') {
-    const pk = `mark:province:${data.province_id}`;
-    const pBtn = markedItems.has(pk)
-      ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.province_name} уже отмечен</div>`
-      : `<button class="tb tb-p" onclick="markArea('province',${id})">📍 ${data.province_name}</button>`;
-    showTip(e, '➕ Добавить в исключения', '',
-      `${pBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+    showTip(e, data.province_name, '',
+      `${_areaBtns('province', id, data.province_name)}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
     return;
   }
 
-  const ck = `mark:county:${data.county_fips}`;
-  const sk = `mark:state:${data.state_fips}`;
-
-  const cBtn = markedItems.has(ck)
-    ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.county_name} уже отмечен</div>`
-    : `<button class="tb tb-p" onclick="markArea('county',${id})">📍 ${data.county_name}, ${data.state_abbr}</button>`;
-
-  const sBtn = data.state_name
-    ? (markedItems.has(sk)
-        ? `<div style="font-size:10.5px;color:#e91e63;padding:3px 9px">✓ ${data.state_name} уже отмечен</div>`
-        : `<button class="tb tb-p" onclick="markArea('state',${id})">📍 ${data.state_name}</button>`)
-    : '';
-
-  showTip(e, '➕ Добавить в исключения', '',
-    `${cBtn}${sBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
+  let html = _areaBtns('county', id, `${data.county_name}, ${data.state_abbr}`);
+  if (data.state_name) html += _areaBtns('state', id, data.state_name);
+  showTip(e, data.county_name, '', `${html}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
 }
 
-async function markArea(type, dataId) {
-  hideTipNow();
-  _clearHover();
-  const data = _pendingAreaData.get(dataId);
-  if (!data) return;
-
-  let key, name, geom;
+async function _resolveAreaGeom(type, data){
+  let name, geom;
   if (type === 'zip') {
-    key  = `mark:zip:${data.zip}`;
-    // "93628, California, United States" — classifyExcLine's ZIP check only
-    // looks at the part before the first comma, so this still re-parses as
-    // a plain ZIP once moved to Excluded; the state/country just make the
-    // marked-list entry legible on its own.
     const st = toStateFullName(data.state_abbr) || data.state_name;
     name = st ? `${data.zip}, ${st}, United States` : data.zip;
     geom = data.zip_geom;
   } else if (type === 'county') {
-    key  = `mark:county:${data.county_fips}`;
     const st = toStateFullName(data.state_abbr) || data.state_name;
     name = st ? `${data.county_name}, ${st}, United States` : data.county_name;
     geom = data.county_geom;
   } else if (type === 'cd') {
-    key  = `mark:cd:${data.cd_state_fips}:${data.cd_fp}`;
     name = `${data.cd_state_name || data.cd_state_abbr}'s ${_ordinal(data.cd_fp)} Congressional District`;
     geom = data.cd_geom;
   } else if (type === 'province') {
-    key  = `mark:province:${data.province_id}`;
     name = data.province_name;
     geom = data.province_geom;
   } else {
-    key  = `mark:state:${data.state_fips}`;
     const st = data.state_name || toStateFullName(data.state_abbr);
     name = st ? `${st}, United States` : data.state_abbr;
     const fc = await fetchStateBoundary(data.state_abbr || data.state_name);
-    if (!fc?.features?.length) return;
+    if (!fc?.features?.length) return null;
     geom = fc.features[0].geometry;
   }
-  if (markedItems.has(key)) return;
-
-  const fc = {type:'FeatureCollection', features:[{
-    type:'Feature', properties:{display_name: type==='zip' ? `ZIP ${name}` : name, _key:key}, geometry:geom
-  }]};
-  const lyr = _buildMarkedLayer(fc).addTo(markedLayer);
-  markedItems.set(key, {name, lyr});
-  _updateMarkedPanel();
-  scheduleOverlap();
+  return geom ? {name, geom} : null;
 }
 
-function _buildMarkedLayer(fc) {
-  return L.geoJSON(fc, {
-    style: SM,
-    onEachFeature(feat, lyr) {
-      const name = feat.properties.display_name;
-      const key  = feat.properties._key;
-      lyr.bindTooltip(name, {sticky:true, offset:[10,0], className:'pt'});
-      lyr.on('contextmenu', function(e) {
-        L.DomEvent.preventDefault(e.originalEvent||e);
-        setActiveLayer(this, SM);
-        this.setStyle(SMH); this.bringToFront();
-        showTip(e,
-          `<span style="color:#e91e63">${name}</span>`,
-          'Отмечено для исключения',
-          `<button class="tb tb-p" onclick="removeMarked('${esc(key)}')">✕ Убрать</button>
-           <button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`
-        );
-      });
-    }
-  });
-}
-
-function removeMarked(key) {
+async function addShowAllArea(type, dataId, target){
   hideTipNow();
-  const item = markedItems.get(key);
-  if (!item) return;
-  markedLayer.removeLayer(item.lyr);
-  markedItems.delete(key);
-  _updateMarkedPanel();
+  _clearHover();
+  const data = _pendingAreaData.get(dataId);
+  if (!data) return;
+  const resolved = await _resolveAreaGeom(type, data);
+  if (!resolved) return;
+  const feat = {type:'Feature', properties:{display_name: resolved.name}, geometry: resolved.geom};
+  if (target === 'inc') _addToIncluded(feat, resolved.name);
+  else _addToExcluded(feat, resolved.name);
   scheduleOverlap();
-}
-
-function clearAllMarked() {
-  markedLayer.clearLayers();
-  markedItems.clear();
-  _updateMarkedPanel();
-  scheduleOverlap();
-}
-
-function applyMarkedToExcluded() {
-  if (!markedItems.size) return;
-  const ta = $('excInput');
-  const existing = ta.value.trim();
-  const newLines = [...markedItems.values()].map(i => i.name).join('\n');
-  ta.value = existing ? existing + '\n' + newLines : newLines;
-  clearAllMarked();
-  loadExcluded();
-}
-
-function _updateMarkedPanel() {
-  const panel = $('markedPanel');
-  if (!markedItems.size) { panel.style.display = 'none'; return; }
-  panel.style.display = '';
-  $('markedList').innerHTML = [...markedItems.entries()].map(([k, {name}]) =>
-    `<div class="marked-item"><span>• ${name}</span><span class="marked-del" onclick="removeMarked('${esc(k)}')">✕</span></div>`
-  ).join('');
-}
-
-// ── Build neutral layer (gray) ────────────────────────────────────────────────
-function buildNeuLayer(fc) {
-  const lyrGroup = L.geoJSON(fc, {
-    style: SN,
-    onEachFeature(feat, lyr) {
-      const p   = feat.properties;
-      const zip = p.ZCTA5CE20 || p.zip;
-      const label = (p.display_name || (zip ? `ZIP ${zip}` : p.NAME || '')) + (p.approx ? ' (прибл. граница)' : '');
-      lyr.bindTooltip(label, {sticky:true, offset:[10,0], className:'nt'});
-
-      lyr.on('mousemove', function(e) {
-        if (!window.turf) return;
-        try {
-          const pt = turf.point([e.latlng.lng, e.latlng.lat]);
-          const seen = new Set(); const labels = [];
-          neuLayer.eachLayer(grp => {
-            const inner = [];
-            if (grp.eachLayer) grp.eachLayer(l => inner.push(l)); else inner.push(grp);
-            for (const l of inner) {
-              if (!l.feature?.geometry) continue;
-              if (l.getBounds && !l.getBounds().contains(e.latlng)) continue;
-              try {
-                if (turf.booleanPointInPolygon(pt, l.feature)) {
-                  const lbl = l.feature.properties.display_name || '';
-                  if (lbl && !seen.has(lbl)) { seen.add(lbl); labels.push(lbl); }
-                }
-              } catch(_) {}
-            }
-          });
-          const tip = this.getTooltip();
-          if (tip) tip.setContent(labels.length > 1 ? labels.join(' | ') : label);
-        } catch(_) {}
-      });
-
-      lyr.on('contextmenu', function(e) {
-        L.DomEvent.preventDefault(e.originalEvent||e);
-        setActiveLayer(this, SN);
-        this.setStyle(SNH); this.bringToFront();
-        const rawLine = p._raw || '';
-        const removeBtn = rawLine
-          ? `<button class="tb tb-g" onclick="removeNeutral('${esc(rawLine)}')">✕ Убрать из нейтральных</button>`
-          : '';
-        showTip(e,
-          `<span style="color:#616161">${label}</span>`,
-          'Нейтральная зона',
-          `${removeBtn}<button class="tb tb-g" onclick="hideTipNow()">✕ Закрыть</button>`);
-      });
-    }
-  });
-  fc.features?.forEach(f => {
-    const raw = f.properties?._raw;
-    if (raw) neuLayers.set(raw, lyrGroup);
-  });
-  return lyrGroup;
-}
-
-function removeNeutral(raw) {
-  hideTipNow();
-  const lg = neuLayers.get(raw);
-  if (lg) neuLayer.removeLayer(lg);
-  neuLayers.delete(raw);
-  const ta = $('neuInput');
-  ta.value = ta.value.split('\n').filter(l => l.trim() !== raw.trim() && l.trim() !== '').join('\n');
 }
 
 // ── Exclude actions ───────────────────────────────────────────────────────────
-async function excludeAsZip(zip, stAbbr, stName){
-  hideTipNow();
-  const key=`zip:${zip}`;
-  if(exclusions.has(key)) return;
-  try{
-    const st = toStateFullName(stAbbr) || stName;
-    const label = st ? `${zip}, ${st}, United States` : `ZIP ${zip}`;
-    const fc = await(await fetch(`/api/zcta?zips=${zip}`)).json();
-    fc.features.forEach(f=>f.properties.display_name=label);
-    addExclusion(key, label, fc);
-    appendExcTA(st ? label : zip);
-  }catch(e){ console.error(e); }
-}
-
-async function excludeAsCounty(fips, name, stAbbr, stName){
-  hideTipNow();
-  const st = toStateFullName(stAbbr) || stName;
-  const label = st ? `${name}, ${st}, United States` : name;
-  const key = `county:${fips||label}`;
-  if(exclusions.has(key)) return;
-  const cleanName = name.replace(/\s*county\s*$/i, '');
-  const fc = await fetchCountyBoundary(cleanName, stAbbr);
-  if(fc?.features?.length){
-    fc.features.forEach(f=>f.properties.display_name=label);
-    addExclusion(key, label, fc);
-    appendExcTA(label);
-  }
-}
-
-async function excludeAsState(fips, name, abbr){
-  hideTipNow();
-  const key = `state:${fips||name}`;
-  if(exclusions.has(key)) return;
-  const st = name || toStateFullName(abbr);
-  const display = st ? `${st}, United States` : (abbr ? 'State '+abbr : '');
-  const fc = await fetchStateBoundary(abbr || name);
-  if(fc?.features?.length){
-    fc.features.forEach(f=>f.properties.display_name=display);
-    addExclusion(key, display, fc);
-    appendExcTA(display);
-  }
-}
-
 function addExclusion(key, name, fc){
   if(exclusions.has(key)) return;
   const lyr = buildExcLayer(fc, key).addTo(excLayer);
@@ -1301,25 +1414,8 @@ function removeExclusion(key){
   const ta=$('excInput');
   const lines = ta.value.split('\n').filter(l=>l.trim()!==e.name&&l.trim()!=='');
   ta.value = lines.join('\n');
-  // Add to removed list
-  removedItems.push(e.name);
-  $('removedList').innerHTML = removedItems.map(s=>`• ${s}`).join('<br>');
-  $('removedPanel').style.display = '';
+  logRemovedExc(e.name);
   updateExcStat();
-  scheduleOverlap();
-}
-
-function removeInclusion(raw){
-  hideTipNow();
-  const lg = incLayers.get(raw);
-  if (lg) incLayer.removeLayer(lg);
-  incLayers.delete(raw);
-  const ta=$('incInput');
-  const lines = ta.value.split('\n').filter(l=>l.trim()!==raw.trim()&&l.trim()!=='');
-  ta.value = lines.join('\n');
-  removedIncItems.push(raw);
-  $('removedIncList').innerHTML = removedIncItems.map(s=>`• ${s}`).join('<br>');
-  $('removedIncPanel').style.display = '';
   scheduleOverlap();
 }
 
@@ -1363,7 +1459,7 @@ function _doOverlap() {
   // Reset all included layers to blue (skip active/highlighted layer)
   incLyrs.forEach(l => { if (l.setStyle && l !== _activeLayer) l.setStyle(SI); });
 
-  const excFeats = [..._collectFeats(excLayer), ..._collectFeats(markedLayer)];
+  const excFeats = _collectFeats(excLayer);
   if (!excFeats.length || !incLyrs.length) return;
 
   const useCentroid = incLyrs.length > 80;
@@ -1398,7 +1494,7 @@ function appendExcTA(line){
 
 function updateExcStat(){
   const n=exclusions.size;
-  setStat('eStat', n?`<b>${n}</b> зон исключено`:'Готов');
+  setStat('eStat', n?`<b>${n}</b> зон исключено`:'');
 }
 
 // ── Load included ─────────────────────────────────────────────────────────────
@@ -1439,7 +1535,13 @@ async function loadIncluded(){
       try {
         const fc = await(await fetch(`/api/zcta?zips=${batch.map(z=>z.zip).join(',')}`)).json();
         if (abort()) return;
-        const found = new Set(fc.features.map(f=>f.properties.ZCTA5CE20||f.properties.zip));
+        const byZip = new Map(batch.map(z => [z.zip, z]));
+        const found = new Set();
+        fc.features.forEach(f => {
+          const z = f.properties.ZCTA5CE20 || f.properties.zip;
+          const item = byZip.get(z);
+          if (item) { f.properties._raw = item.raw; found.add(z); }
+        });
         batch.filter(z=>!found.has(z.zip)).forEach(z=>notFoundList.push(z.raw));
         loaded += found.size;
         if(fc.features.length) buildIncLayer(fc).addTo(incLayer);
@@ -2306,7 +2408,7 @@ function clearIncluded(){
   incLayers.clear();
   overlapLayer.clearLayers();
   clearRemovedInc();
-  setProg('iProg',0); setStat('iStat','Готов');
+  setProg('iProg',0); setStat('iStat','');
 }
 function clearExcluded(){
   ++_excGen;          // abort any in-flight loadExcluded
@@ -2315,219 +2417,7 @@ function clearExcluded(){
   excLayer.clearLayers();
   exclusions.clear();
   overlapLayer.clearLayers();
-  setProg('eProg',0); setStat('eStat','Готов');
-}
-
-// ── Load neutral ──────────────────────────────────────────────────────────────
-async function loadNeutral() {
-  const gen = ++_neuGen;
-  const abort = () => _neuGen !== gen;
-
-  const rawLines = $('neuInput').value.split('\n').map(l => l.trim()).filter(Boolean);
-  if (!rawLines.length) { setStat('nStat', 'Нет данных'); return; }
-  neuLayer.clearLayers(); neuLayers.clear(); setProg('nProg', 2);
-
-  const items  = rawLines.map(classifyExcLine).filter(Boolean);
-  const byType = {
-    zip:    items.filter(i => i.type === 'zip'),
-    state:  items.filter(i => i.type === 'state'),
-    county: items.filter(i => i.type === 'county'),
-    cd:     items.filter(i => i.type === 'cd'),
-    dma:    items.filter(i => i.type === 'dma'),
-    place:  items.filter(i => i.type === 'place'),
-    radius: items.filter(i => i.type === 'radius'),
-  };
-  const total = items.length;
-  let loaded = 0;
-  const notFoundList = [];
-
-  const tick = (label) => {
-    setProg('nProg', Math.round(5 + loaded / total * 90));
-    setStat('nStat', `${label} (${loaded}/${total})…`);
-  };
-
-  // 1. ZIPs
-  if (byType.zip.length) {
-    if (abort()) return;
-    tick('ZIP-коды');
-    const BATCH = 400;
-    for (let i = 0; i < byType.zip.length; i += BATCH) {
-      if (abort()) return;
-      const batch = byType.zip.slice(i, i + BATCH);
-      try {
-        const fc = await (await fetch(`/api/zcta?zips=${batch.map(z => z.zip).join(',')}`)).json();
-        if (abort()) return;
-        const found = new Set(fc.features.map(f => f.properties.ZCTA5CE20 || f.properties.zip));
-        batch.filter(z => !found.has(z.zip)).forEach(z => notFoundList.push(z.raw));
-        loaded += found.size;
-        if (fc.features.length) buildNeuLayer(fc).addTo(neuLayer);
-      } catch { batch.forEach(z => notFoundList.push(z.raw)); }
-    }
-  }
-
-  // 2. Congressional districts
-  if (byType.cd.length) {
-    if (abort()) return;
-    tick('Округа Конгресса');
-    const cdMap = await fetchAllCDs(byType.cd);
-    if (abort()) return;
-    for (const item of byType.cd) {
-      const feat = cdMap.get(`${item.state}:${item.num}`);
-      if (feat) {
-        feat.properties.display_name = item.display;
-        feat.properties._raw = item.raw;
-        buildNeuLayer({type:'FeatureCollection',features:[feat]}).addTo(neuLayer);
-        loaded++;
-      } else notFoundList.push(item.raw);
-    }
-  }
-
-  // 3. States
-  if (byType.state.length) {
-    if (abort()) return;
-    tick('Штаты');
-    const localMap = await searchLocalBatch(byType.state.map(i => i.name));
-    if (abort()) return;
-    for (const item of byType.state) {
-      const fc = localMap.get(item.name);
-      if (fc) {
-        fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
-        buildNeuLayer(fc).addTo(neuLayer); loaded++;
-      } else {
-        if (abort()) return;
-        try {
-          const fc2 = await fetchStateBoundary(item.name);
-          if (abort()) return;
-          if (hasPolygon(fc2)) {
-            fc2.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
-            buildNeuLayer(fc2).addTo(neuLayer); loaded++;
-          } else notFoundList.push(item.raw);
-        } catch { notFoundList.push(item.raw); }
-      }
-    }
-  }
-
-  // 4. Counties
-  if (byType.county.length) {
-    if (abort()) return;
-    tick('Округа');
-    const localMap = await fetchCountiesBatchLocal(byType.county);
-    if (abort()) return;
-    const needTiger = [];
-    for (const item of byType.county) {
-      const stAbbr = toStateAbbr(item.state).toLowerCase();
-      const feat = localMap.get(`${item.name.toLowerCase()}:${stAbbr}`)
-                || localMap.get(`${item.name.toLowerCase()}:`);
-      if (feat) {
-        feat.properties.display_name = item.display; feat.properties._raw = item.raw;
-        buildNeuLayer({type:'FeatureCollection',features:[feat]}).addTo(neuLayer); loaded++;
-      } else needTiger.push(item);
-    }
-    if (needTiger.length) {
-      if (abort()) return;
-      const tigerMap = await fetchAllCounties(needTiger);
-      if (abort()) return;
-      for (const item of needTiger) {
-        const feat = tigerMap.get(`${item.name.toLowerCase()}:${item.state.toLowerCase()}`)
-                  || tigerMap.get(`${item.name.toLowerCase()}:`);
-        if (feat) {
-          feat.properties.display_name = item.display; feat.properties._raw = item.raw;
-          buildNeuLayer({type:'FeatureCollection',features:[feat]}).addTo(neuLayer); loaded++;
-        } else notFoundList.push(item.raw);
-      }
-    }
-  }
-
-  // 5. DMA (Nielsen media markets) — server-side union of member counties
-  if (byType.dma.length) {
-    if (abort()) return;
-    tick('DMA-рынки');
-    const dmaMap = await fetchDmaBatch(byType.dma);
-    if (abort()) return;
-    for (const item of byType.dma) {
-      const result = dmaMap.get(item.key);
-      if (result?.fc?.features?.length) {
-        result.fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
-        buildNeuLayer(result.fc).addTo(neuLayer); loaded++;
-      } else notFoundList.push(item.raw);
-    }
-    tick('DMA-рынки');
-  }
-
-  // 6. Places
-  if (byType.place.length) {
-    if (abort()) return;
-    tick('Места');
-    const dbMap = await searchLocalBatch(byType.place.map(i => i.query));
-    if (abort()) return;
-    const needNom = [];
-    for (const item of byType.place) {
-      const fc = dbMap.get(item.query);
-      if (fc) {
-        fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
-        buildNeuLayer(fc).addTo(neuLayer); loaded++;
-      } else needNom.push(item);
-    }
-    for (const item of needNom) {
-      if (abort()) return;
-      tick(`Nominatim: ${item.display}`);
-      try {
-        let fc = await nomSearch(item.query, {countrycodes:'us'});
-        if (abort()) return;
-        if (!hasPolygon(fc)) fc = await nomSearch(item.query);
-        if (abort()) return;
-        if (hasPolygon(fc)) {
-          fc.features.forEach(f => { f.properties.display_name = item.display; f.properties._raw = item.raw; });
-          buildNeuLayer(fc).addTo(neuLayer); loaded++;
-        } else notFoundList.push(item.raw);
-      } catch { notFoundList.push(item.raw); }
-    }
-  }
-
-  // 7. Radius circles
-  if (byType.radius.length) {
-    if (abort()) return;
-    let rDone = 0;
-    tick(`Радиусы (0/${byType.radius.length})…`);
-    const radiusResults = [];
-    for (let i = 0; i < byType.radius.length; i += 10) {
-      if (abort()) return;
-      const batch = byType.radius.slice(i, i + 10);
-      const res = await Promise.all(batch.map(async item => {
-        try { const fc = await fetchRadius(item); tick(`Радиусы (${++rDone}/${byType.radius.length})…`); return {item, fc}; }
-        catch { return {item, fc:null}; }
-      }));
-      radiusResults.push(...res);
-    }
-    if (abort()) return;
-    for (const {item, fc} of radiusResults) {
-      if (fc?.features?.length) {
-        fc.features.forEach(f => f.properties._raw = item.raw);
-        buildNeuLayer(fc).addTo(neuLayer); loaded++;
-      } else notFoundList.push(item.raw);
-    }
-  }
-
-  if (abort()) return;
-  setProg('nProg', 100);
-  if (neuLayer.getLayers().length) map.fitBounds(neuLayer.getBounds(), {padding:[30,30]});
-
-  const parts = [`✅ <b>${loaded}</b>/${total} загружено`];
-  if (notFoundList.length) {
-    const listHtml = notFoundList.map(s => `<span style="color:#c62828">• ${s}</span>`).join('<br>');
-    setStat('nStat', parts.join(' · ') + ` · ⚠️ не найдено: <b>${notFoundList.length}</b><div style="margin-top:4px;line-height:1.6">${listHtml}</div>`);
-  } else {
-    setStat('nStat', parts.join(' · '));
-  }
-}
-
-function clearNeutral() {
-  ++_neuGen;
-  hideTipNow();
-  $('neuInput').value = '';
-  neuLayer.clearLayers();
-  neuLayers.clear();
-  setProg('nProg', 0); setStat('nStat', 'Готов');
+  setProg('eProg',0); setStat('eStat','');
 }
 
 // ── Bulk-add remaining US zones to Excluded ────────────────────────────────
