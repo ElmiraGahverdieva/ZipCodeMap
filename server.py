@@ -186,17 +186,20 @@ def query_zips(zips):
         cw_rows = conn.execute(
             f"SELECT zip, zcta FROM zip_crosswalk WHERE zip IN ({ph2})", missing
         ).fetchall()
+        # Parent ZCTAs already fetched above (because the parent ZIP was also
+        # requested) must be reused too, not just the newly fetched ones.
+        parent_geom = dict(geoms)
         needed = {r["zcta"] for r in cw_rows if r["zcta"] not in geoms}
         if needed:
             ph3 = ",".join("?" * len(needed))
             zcta_rows = conn.execute(
                 f"SELECT zip, geometry FROM zcta WHERE zip IN ({ph3})", list(needed)
             ).fetchall()
-            parent_geom = {r["zip"]: r["geometry"] for r in zcta_rows}
-            for r in cw_rows:
-                if r["zcta"] in parent_geom:
-                    geoms[r["zip"]] = parent_geom[r["zcta"]]
-                    approx.add(r["zip"])
+            parent_geom.update({r["zip"]: r["geometry"] for r in zcta_rows})
+        for r in cw_rows:
+            if r["zcta"] in parent_geom:
+                geoms[r["zip"]] = parent_geom[r["zcta"]]
+                approx.add(r["zip"])
     conn.close()
 
     features = []
