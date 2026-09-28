@@ -1645,11 +1645,13 @@ async function loadIncluded(){
   if (byType.place.length) {
     if (abort()) return;
     tick('Места');
-    const dbMap = await searchLocalBatch(byType.place.map(i=>i.query));
+    // Settlements skip the local DB — it holds only countries, states,
+    // counties and townships, so a city name would match its state instead.
+    const dbMap = await searchLocalBatch(byType.place.filter(i=>!i.featuretype).map(i=>i.query));
     if (abort()) return;
     const needNom = [];
     for (const item of byType.place) {
-      const fc = dbMap.get(item.query);
+      const fc = !item.featuretype && dbMap.get(item.query);
       if (fc) {
         fc.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
         buildIncLayer(fc).addTo(incLayer); loaded++;
@@ -1659,9 +1661,9 @@ async function loadIncluded(){
       if (abort()) return;
       tick(`Nominatim: ${item.display}`);
       try {
-        let fc = await nomSearch(item.query, {countrycodes:'us'});
+        let fc = await nomSearch(item.query, {countrycodes:'us', featuretype:item.featuretype});
         if (abort()) return;
-        if (!hasPolygon(fc)) fc = await nomSearch(item.query);
+        if (!hasPolygon(fc)) fc = await nomSearch(item.query, {featuretype:item.featuretype});
         if (abort()) return;
         if (hasPolygon(fc)) {
           fc.features.forEach(f=>{f.properties.display_name=item.display;f.properties._raw=item.raw;});
@@ -1747,6 +1749,10 @@ function classifyExcLine(raw) {
 
   // Strip trailing type annotations: "(city)", "(county)", "(state/province)", etc.
   // Uses letter-only pattern — does NOT strip coordinate strings like "(32.8,-116.7)"
+  // A settlement annotation is kept as a hint: "New York, New York (city)"
+  // must resolve to the city, not collapse into the same-named state.
+  const annM = line.match(/\(\s*(city|town|village|hamlet|borough|neighborhood|municipality)\s*\)\s*$/i);
+  const isSettlement = !!annM;
   line = line.replace(/\s*\([a-zA-Z\/\s-]{3,}\)\s*$/, '').trim();
 
   // Strip trailing country qualifiers
@@ -1828,6 +1834,11 @@ function classifyExcLine(raw) {
   // city shares its name with its containing province/state. Nominatim's
   // structured search otherwise treats the redundant repeat as a stricter
   // filter and returns only a point marker instead of the area boundary.
+  // A settlement keeps its repeat: "New York, New York" is city + state.
+  if (isSettlement) {
+    return { raw, type:'place', query: parts.join(', '), display:first || line,
+             featuretype:'city', key:`place:city:${line.toLowerCase()}` };
+  }
   const dedupedParts = parts.filter((p, i) => i === 0 || p.toLowerCase() !== parts[i - 1].toLowerCase());
   const query = dedupedParts.join(', ');
   return { raw, type:'place', query, display:first || line,
@@ -1867,9 +1878,17 @@ async function geocodePoint(query) {
   // Photon: fast, no rate limit, great for city/address queries
   try {
     const url = 'https://photon.komoot.io/api/?' +
-      new URLSearchParams({ q: query, limit: '1', lang: 'en' });
+      new URLSearchParams({ q: query, limit: '5', lang: 'en' });
     const j = await (await fetch(url)).json();
-    const coords = j?.features?.[0]?.geometry?.coordinates;
+    // Photon often ranks a same-named county/state above the town itself
+    // ("Alpine, California" → Alpine County, not Alpine near San Diego), so
+    // prefer a settlement unless the query explicitly asks for a county.
+    const feats = j?.features || [];
+    const wantsArea = /\b(county|parish|borough|state|province)\b/i.test(query);
+    const pick = (!wantsArea && feats.find(f => ['city','district','locality'].includes(f.properties?.type)))
+      || (!wantsArea && feats.find(f => !['county','state','country'].includes(f.properties?.type)))
+      || feats[0];
+    const coords = pick?.geometry?.coordinates;
     if (coords && !coords.some(isNaN)) {
       const pt = [coords[0], coords[1]];
       _geoCache(ck, pt);
@@ -1905,7 +1924,7 @@ async function geocodePoint(query) {
 // localStorage cache for geocoded radius centers (survives page reload)
 function _geoCache(key, val) {
   try {
-    const s = '_rc';
+    const s = '_rc2'; // bumped: '_rc' may hold county-centered picks from before the settlement preference
     if (val !== undefined) {
       const c = JSON.parse(localStorage.getItem(s) || '{}');
       c[key] = val;
@@ -2318,12 +2337,12 @@ async function loadExcluded() {
 
     if (newPlaces.length) {
       setStat('eStat', `Поиск в базе… (${done}/${total})`);
-      const dbMap = await searchLocalBatch(newPlaces.map(i => i.query));
+      const dbMap = await searchLocalBatch(newPlaces.filter(i => !i.featuretype).map(i => i.query));
       if (abort()) return;
 
       const needNominatim = [];
       for (const item of newPlaces) {
-        const fc = dbMap.get(item.query);
+        const fc = !item.featuretype && dbMap.get(item.query);
         if (fc) {
           const label = fc.features[0]?.properties?.display_name || item.display;
           fc.features.forEach(f => f.properties.display_name = label);
@@ -2339,9 +2358,9 @@ async function loadExcluded() {
         if (abort()) return;
         tick(`Nominatim: ${item.display}`);
         try {
-          let fc = await nomSearch(item.query, { countrycodes:'us' });
+          let fc = await nomSearch(item.query, { countrycodes:'us', featuretype:item.featuretype });
           if (abort()) return;
-          if (!hasPolygon(fc)) fc = await nomSearch(item.query);
+          if (!hasPolygon(fc)) fc = await nomSearch(item.query, { featuretype:item.featuretype });
           if (abort()) return;
           if (hasPolygon(fc)) {
             const label = fc.features[0]?.properties?.display_name || item.display;
